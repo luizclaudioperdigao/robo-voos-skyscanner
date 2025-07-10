@@ -10,5 +10,6 @@ COPY . .
 # Instala as dependências listadas no requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Comando padrão para rodar o robô
-CMD ["python", "robo_voos.py"]
+# Comando padrão para rodar o robô em modo unbuffered (logs em tempo real)
+CMD ["python", "-u", "robo_voos.py"]
+
