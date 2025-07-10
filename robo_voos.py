@@ -10,8 +10,8 @@ DATA_VOLTA = "2025-10-05"  # 20 dias após a ida
 MAX_PRECO = 2000  # Alerta se o valor estiver abaixo disso (em R$)
 INTERVALO_MINUTOS = 10
 
-# Telegram (inserido conforme solicitado)
-TELEGRAM_TOKEN = "7478647827"
+# Telegram (token já atualizado)
+TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
 TELEGRAM_CHAT_ID = "603459673"
 
 def enviar_mensagem(texto):
@@ -37,7 +37,6 @@ def buscar_voo():
 
         soup = BeautifulSoup(response.text, "html.parser")
 
-        # Buscar o menor preço na página
         preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
         if not preco_span:
             print("⚠ Não foi possível encontrar o preço.")
@@ -53,6 +52,7 @@ def buscar_voo():
         return None
 
 def main():
+    print("Robô de busca de voos iniciado!")
     while True:
         print("🚀 Iniciando verificação de voos no Skyscanner...")
 
@@ -79,6 +79,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
-
-      
