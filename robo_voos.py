@@ -8,7 +8,7 @@ DESTINO = "MCO"
 DATA_IDA = "2025-09-15"
 DATA_VOLTA = "2025-10-05"  # 20 dias após a ida
 MAX_PRECO = 2000  # Alerta se o valor estiver abaixo disso (em R$)
-INTERVALO_MINUTOS = 10
+INTERVALO_SEGUNDOS = 10  # intervalo menor só para teste
 
 # Telegram (token já atualizado)
 TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
@@ -53,8 +53,8 @@ def buscar_voo():
 
 def main():
     print("Robô de busca de voos iniciado!")
-    while True:
-        print("🚀 Iniciando verificação de voos no Skyscanner...")
+    for i in range(3):
+        print(f"🚀 Iniciando verificação de voos no Skyscanner... (rodada {i+1})")
 
         preco = buscar_voo()
 
@@ -74,8 +74,10 @@ def main():
             else:
                 print("🔎 Preço acima do limite, nenhum alerta enviado.")
 
-        print(f"⏳ Aguardando {INTERVALO_MINUTOS} minutos para próxima busca...\n")
-        time.sleep(INTERVALO_MINUTOS * 60)
+        print(f"⏳ Aguardando {INTERVALO_SEGUNDOS} segundos para próxima busca...\n")
+        time.sleep(INTERVALO_SEGUNDOS)
+
+    print("Execução de teste finalizada.")
 
 if __name__ == "__main__":
     main()
