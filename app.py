@@ -2,21 +2,39 @@ import time
 import requests
 from bs4 import BeautifulSoup
 from threading import Thread
+import json
+import os
 
-# Configurações iniciais
-ORIGEM = "CNF"
-DESTINO = "MCO"
-DATA_IDA = "2025-09-15"
-DATA_VOLTA = "2025-10-05"
-MAX_PRECO = 2000
+# ===== Funções de configuração =====
 
-# Telegram
+CONFIG_PATH = "config.json"
+
+def carregar_config():
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, "r") as f:
+            return json.load(f)
+    else:
+        return {
+            "origem": "CNF",
+            "destino": "MCO",
+            "data_ida": "2025-09-15",
+            "data_volta": "2025-10-05",
+            "max_preco": 2000
+        }
+
+def salvar_config():
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(CONFIG, f, indent=2)
+
+# Carrega ao iniciar
+CONFIG = carregar_config()
+ESTADO_ATUALIZACAO = None
+
+# ===== Telegram =====
+
 TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
 TELEGRAM_CHAT_ID = "603459673"
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-
-# Estado de atualização (1 usuário fixo)
-ESTADO_ATUALIZACAO = None  # Ex: "ORIGEM", "DESTINO", etc.
 
 def enviar_mensagem(chat_id, texto, botoes=None):
     url = f"{TELEGRAM_API_URL}/sendMessage"
@@ -36,8 +54,10 @@ def enviar_mensagem(chat_id, texto, botoes=None):
     except Exception as e:
         print(f"Erro ao enviar mensagem: {e}")
 
+# ===== Busca de voo =====
+
 def buscar_voo():
-    url = f"https://www.skyscanner.com.br/transport/flights/{ORIGEM}/{DESTINO}/{DATA_IDA}/{DATA_VOLTA}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
+    url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         r = requests.get(url, headers=headers, timeout=30)
@@ -55,8 +75,10 @@ def buscar_voo():
         print(f"Erro ao buscar preço: {e}")
         return None
 
+# ===== Processamento de comandos =====
+
 def processar_comandos():
-    global ORIGEM, DESTINO, DATA_IDA, DATA_VOLTA, MAX_PRECO, ESTADO_ATUALIZACAO
+    global ESTADO_ATUALIZACAO
     offset = None
     while True:
         try:
@@ -72,13 +94,12 @@ def processar_comandos():
             for update in updates:
                 offset = update["update_id"] + 1
 
-                # Callback button
+                # Botões
                 if "callback_query" in update:
                     callback = update["callback_query"]
                     data = callback["data"]
                     chat_id = callback["message"]["chat"]["id"]
-
-                    ESTADO_ATUALIZACAO = data  # Ex: "ORIGEM", "DESTINO"
+                    ESTADO_ATUALIZACAO = data
                     perguntas = {
                         "ORIGEM": "✈️ Qual é a nova origem? (Ex: CNF)",
                         "DESTINO": "🏁 Qual é o novo destino? (Ex: MCO)",
@@ -89,25 +110,26 @@ def processar_comandos():
                     enviar_mensagem(chat_id, perguntas[data])
                     continue
 
-                # Mensagem normal
+                # Mensagem
                 message = update.get("message")
                 if not message: continue
                 chat_id = message["chat"]["id"]
                 texto = message.get("text", "").strip()
 
-                # Atualizando configuração conforme última seleção
+                # Atualização guiada
                 if ESTADO_ATUALIZACAO:
                     try:
                         if ESTADO_ATUALIZACAO == "ORIGEM":
-                            ORIGEM = texto.upper()
+                            CONFIG["origem"] = texto.upper()
                         elif ESTADO_ATUALIZACAO == "DESTINO":
-                            DESTINO = texto.upper()
+                            CONFIG["destino"] = texto.upper()
                         elif ESTADO_ATUALIZACAO == "IDA":
-                            DATA_IDA = texto
+                            CONFIG["data_ida"] = texto
                         elif ESTADO_ATUALIZACAO == "VOLTA":
-                            DATA_VOLTA = texto
+                            CONFIG["data_volta"] = texto
                         elif ESTADO_ATUALIZACAO == "PRECO":
-                            MAX_PRECO = float(texto)
+                            CONFIG["max_preco"] = float(texto)
+                        salvar_config()
                         enviar_mensagem(chat_id, "✅ Configuração atualizada com sucesso!")
                     except:
                         enviar_mensagem(chat_id, "❌ Erro ao atualizar. Verifique o valor informado.")
@@ -120,11 +142,11 @@ def processar_comandos():
                 elif texto == "/configuracoes":
                     msg = (
                         f"<b>🔧 Configurações atuais:</b>\n"
-                        f"• Origem: {ORIGEM}\n"
-                        f"• Destino: {DESTINO}\n"
-                        f"• Ida: {DATA_IDA}\n"
-                        f"• Volta: {DATA_VOLTA}\n"
-                        f"• Preço máximo: R$ {MAX_PRECO:.2f}"
+                        f"• Origem: {CONFIG['origem']}\n"
+                        f"• Destino: {CONFIG['destino']}\n"
+                        f"• Ida: {CONFIG['data_ida']}\n"
+                        f"• Volta: {CONFIG['data_volta']}\n"
+                        f"• Preço máximo: R$ {CONFIG['max_preco']:.2f}"
                     )
                     botoes = [
                         [
@@ -144,6 +166,8 @@ def processar_comandos():
             print(f"Erro no loop de comandos: {e}")
         time.sleep(2)
 
+# ===== Monitoramento de passagens =====
+
 def loop_busca_voos():
     while True:
         preco = buscar_voo()
@@ -151,21 +175,23 @@ def loop_busca_voos():
             print("❌ Preço não encontrado.")
         else:
             print(f"💰 Preço atual: R$ {preco:.2f}")
-            if preco <= MAX_PRECO:
+            if preco <= CONFIG["max_preco"]:
                 mensagem = (
                     f"✈️ Voo barato encontrado!\n"
-                    f"Origem: {ORIGEM}\n"
-                    f"Destino: {DESTINO}\n"
-                    f"Ida: {DATA_IDA}\n"
-                    f"Volta: {DATA_VOLTA}\n"
+                    f"Origem: {CONFIG['origem']}\n"
+                    f"Destino: {CONFIG['destino']}\n"
+                    f"Ida: {CONFIG['data_ida']}\n"
+                    f"Volta: {CONFIG['data_volta']}\n"
                     f"Preço: R$ {preco:.2f}\n"
-                    f"🔗 https://www.skyscanner.com.br/transport/flights/{ORIGEM}/{DESTINO}/{DATA_IDA}/{DATA_VOLTA}/"
+                    f"🔗 https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/"
                 )
                 enviar_mensagem(TELEGRAM_CHAT_ID, mensagem)
             else:
                 print("🔎 Preço acima do limite.")
-        print("⏳ Aguardando 10 minutos...\n")
+        print("⏳ Esperando 10 minutos...\n")
         time.sleep(600)
+
+# ===== Main =====
 
 def main():
     Thread(target=processar_comandos, daemon=True).start()
