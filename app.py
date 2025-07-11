@@ -5,8 +5,6 @@ from threading import Thread
 import json
 import os
 
-# ===== Funções de configuração =====
-
 CONFIG_PATH = "config.json"
 
 def carregar_config():
@@ -14,23 +12,26 @@ def carregar_config():
         with open(CONFIG_PATH, "r") as f:
             return json.load(f)
     else:
+        # Configuração padrão e estado inicial de busca (não pausado)
         return {
             "origem": "CNF",
             "destino": "MCO",
             "data_ida": "2025-09-15",
             "data_volta": "2025-10-05",
-            "max_preco": 2000
+            "max_preco": 2000,
+            "busca_pausada": False,
+            "estatisticas": {
+                "buscas_feitas": 0,
+                "ult_voo_baixo_preco": None
+            }
         }
 
 def salvar_config():
     with open(CONFIG_PATH, "w") as f:
         json.dump(CONFIG, f, indent=2)
 
-# Carrega ao iniciar
 CONFIG = carregar_config()
 ESTADO_ATUALIZACAO = None
-
-# ===== Telegram =====
 
 TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
 TELEGRAM_CHAT_ID = "603459673"
@@ -54,8 +55,6 @@ def enviar_mensagem(chat_id, texto, botoes=None):
     except Exception as e:
         print(f"Erro ao enviar mensagem: {e}")
 
-# ===== Busca de voo =====
-
 def buscar_voo():
     url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -75,8 +74,6 @@ def buscar_voo():
         print(f"Erro ao buscar preço: {e}")
         return None
 
-# ===== Processamento de comandos =====
-
 def processar_comandos():
     global ESTADO_ATUALIZACAO
     offset = None
@@ -94,7 +91,7 @@ def processar_comandos():
             for update in updates:
                 offset = update["update_id"] + 1
 
-                # Botões
+                # Botões inline
                 if "callback_query" in update:
                     callback = update["callback_query"]
                     data = callback["data"]
@@ -110,13 +107,13 @@ def processar_comandos():
                     enviar_mensagem(chat_id, perguntas[data])
                     continue
 
-                # Mensagem
                 message = update.get("message")
-                if not message: continue
+                if not message:
+                    continue
                 chat_id = message["chat"]["id"]
                 texto = message.get("text", "").strip()
 
-                # Atualização guiada
+                # Atualização guiada via mensagens
                 if ESTADO_ATUALIZACAO:
                     try:
                         if ESTADO_ATUALIZACAO == "ORIGEM":
@@ -136,7 +133,7 @@ def processar_comandos():
                     ESTADO_ATUALIZACAO = None
                     continue
 
-                # Comandos
+                # Comandos gerais
                 if texto == "/start":
                     enviar_mensagem(chat_id, "Olá! Sou seu bot de voos baratos. Use /configuracoes para alterar.")
                 elif texto == "/configuracoes":
@@ -146,7 +143,8 @@ def processar_comandos():
                         f"• Destino: {CONFIG['destino']}\n"
                         f"• Ida: {CONFIG['data_ida']}\n"
                         f"• Volta: {CONFIG['data_volta']}\n"
-                        f"• Preço máximo: R$ {CONFIG['max_preco']:.2f}"
+                        f"• Preço máximo: R$ {CONFIG['max_preco']:.2f}\n"
+                        f"• Busca pausada: {'Sim' if CONFIG['busca_pausada'] else 'Não'}"
                     )
                     botoes = [
                         [
@@ -159,39 +157,84 @@ def processar_comandos():
                         ],
                         [
                             {"text": "💸 Alterar Preço", "callback_data": "PRECO"}
+                        ],
+                        [
+                            {"text": "⏸️ Pausar busca", "callback_data": "PAUSAR"},
+                            {"text": "▶️ Continuar busca", "callback_data": "CONTINUAR"}
                         ]
                     ]
                     enviar_mensagem(chat_id, msg, botoes)
+                elif texto == "/status":
+                    est = CONFIG.get("estatisticas", {})
+                    ult_voo = est.get("ult_voo_baixo_preco")
+                    ult_voo_str = (f"R$ {ult_voo:.2f}" if ult_voo else "Nenhum ainda")
+                    msg = (
+                        f"<b>📊 Status do Bot:</b>\n"
+                        f"• Busca pausada: {'Sim' if CONFIG['busca_pausada'] else 'Não'}\n"
+                        f"• Buscas feitas: {est.get('buscas_feitas',0)}\n"
+                        f"• Último voo barato: {ult_voo_str}\n"
+                    )
+                    enviar_mensagem(chat_id, msg)
+                elif texto == "/pausar":
+                    CONFIG["busca_pausada"] = True
+                    salvar_config()
+                    enviar_mensagem(chat_id, "⏸️ Busca pausada. O bot não fará buscas até você enviar /continuar.")
+                elif texto == "/continuar":
+                    CONFIG["busca_pausada"] = False
+                    salvar_config()
+                    enviar_mensagem(chat_id, "▶️ Busca retomada. O bot voltará a fazer buscas.")
+                else:
+                    enviar_mensagem(chat_id, "Comando não reconhecido. Use /configuracoes ou /status.")
+
+                # Callback para pausar/continuar via botões
+                if "callback_query" in update:
+                    data = update["callback_query"]["data"]
+                    chat_id = update["callback_query"]["message"]["chat"]["id"]
+                    if data == "PAUSAR":
+                        CONFIG["busca_pausada"] = True
+                        salvar_config()
+                        enviar_mensagem(chat_id, "⏸️ Busca pausada via botão.")
+                    elif data == "CONTINUAR":
+                        CONFIG["busca_pausada"] = False
+                        salvar_config()
+                        enviar_mensagem(chat_id, "▶️ Busca retomada via botão.")
+
         except Exception as e:
             print(f"Erro no loop de comandos: {e}")
         time.sleep(2)
 
-# ===== Monitoramento de passagens =====
-
 def loop_busca_voos():
     while True:
-        preco = buscar_voo()
-        if preco is None:
-            print("❌ Preço não encontrado.")
+        if CONFIG.get("busca_pausada"):
+            print("🔴 Busca pausada. Aguardando retomada...")
         else:
-            print(f"💰 Preço atual: R$ {preco:.2f}")
-            if preco <= CONFIG["max_preco"]:
-                mensagem = (
-                    f"✈️ Voo barato encontrado!\n"
-                    f"Origem: {CONFIG['origem']}\n"
-                    f"Destino: {CONFIG['destino']}\n"
-                    f"Ida: {CONFIG['data_ida']}\n"
-                    f"Volta: {CONFIG['data_volta']}\n"
-                    f"Preço: R$ {preco:.2f}\n"
-                    f"🔗 https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/"
-                )
-                enviar_mensagem(TELEGRAM_CHAT_ID, mensagem)
-            else:
-                print("🔎 Preço acima do limite.")
-        print("⏳ Esperando 1 minuto...\n")
-        time.sleep(60)
+            preco = buscar_voo()
+            CONFIG["estatisticas"]["buscas_feitas"] = CONFIG["estatisticas"].get("buscas_feitas", 0) + 1
 
-# ===== Main =====
+            if preco is None:
+                print("❌ Preço não encontrado.")
+            else:
+                print(f"💰 Preço atual: R$ {preco:.2f}")
+                if preco <= CONFIG["max_preco"]:
+                    CONFIG["estatisticas"]["ult_voo_baixo_preco"] = preco
+                    salvar_config()
+                    mensagem = (
+                        f"✈️ <b>Voo barato encontrado!</b>\n"
+                        f"📍 Origem: {CONFIG['origem']}\n"
+                        f"📍 Destino: {CONFIG['destino']}\n"
+                        f"🗓️ Ida: {CONFIG['data_ida']}\n"
+                        f"🗓️ Volta: {CONFIG['data_volta']}\n"
+                        f"💰 Preço: <b>R$ {preco:.2f}</b>"
+                    )
+                    link_voo = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/"
+                    botoes = [[{"text": "🔗 Comprar agora", "url": link_voo}]]
+                    enviar_mensagem(TELEGRAM_CHAT_ID, mensagem, botoes)
+                else:
+                    print("🔎 Preço acima do limite.")
+
+        print("⏳ Esperando 1 minuto...\n")
+        salvar_config()
+        time.sleep(60)
 
 def main():
     Thread(target=processar_comandos, daemon=True).start()
