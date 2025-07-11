@@ -3,6 +3,11 @@ app = "robo-voos-skyscanner-q2anvq"
 [build]
 
 [env]
+# Se precisar, adicione aqui por exemplo:
+# TELEGRAM_TOKEN = "seu_token"
+# DESTINO_PADRAO = "MCO"
 
-[deploy]
-  release_command = ""
+# Se não tiver nenhuma env fixa, pode deixar vazio
+
+# Removido: [deploy] release_command, pois não está em uso
+
