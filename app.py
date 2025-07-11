@@ -49,6 +49,7 @@ def buscar_voo():
         return None
 
 def processar_comandos():
+    global ORIGEM, DESTINO, DATA_IDA, DATA_VOLTA, MAX_PRECO
     offset = None
     while True:
         try:
@@ -68,10 +69,10 @@ def processar_comandos():
                     continue
 
                 chat_id = message["chat"]["id"]
-                texto = message.get("text", "").lower()
+                texto = message.get("text", "").lower().strip()
 
                 if texto == "/start":
-                    enviar_mensagem(chat_id, "Olá! Sou seu bot de voos baratos. Use comandos para interagir.")
+                    enviar_mensagem(chat_id, "Olá! Sou seu bot de voos baratos. Use comandos:\n/start\n/configuracoes\n/atualizar_config")
                 elif texto == "/configuracoes":
                     msg = (
                         f"Configurações atuais:\n"
@@ -82,6 +83,20 @@ def processar_comandos():
                         f"Preço máximo: R$ {MAX_PRECO}"
                     )
                     enviar_mensagem(chat_id, msg)
+                elif texto.startswith("/atualizar_config"):
+                    partes = texto.split()
+                    if len(partes) == 6:
+                        try:
+                            ORIGEM = partes[1].upper()
+                            DESTINO = partes[2].upper()
+                            DATA_IDA = partes[3]
+                            DATA_VOLTA = partes[4]
+                            MAX_PRECO = float(partes[5])
+                            enviar_mensagem(chat_id, "✅ Configurações atualizadas com sucesso!")
+                        except Exception:
+                            enviar_mensagem(chat_id, "❌ Erro ao processar valores. Verifique os dados enviados.")
+                    else:
+                        enviar_mensagem(chat_id, "❌ Formato inválido.\nUse: /atualizar_config CNF MCO 2025-09-15 2025-10-05 2000")
         except Exception as e:
             print(f"Erro ao ler comandos: {e}")
         time.sleep(2)
