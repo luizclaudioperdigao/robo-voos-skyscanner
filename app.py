@@ -188,8 +188,8 @@ def loop_busca_voos():
                 enviar_mensagem(TELEGRAM_CHAT_ID, mensagem)
             else:
                 print("🔎 Preço acima do limite.")
-        print("⏳ Esperando 10 minutos...\n")
-        time.sleep(600)
+        print("⏳ Esperando 1 minuto...\n")
+        time.sleep(60)
 
 # ===== Main =====
 
