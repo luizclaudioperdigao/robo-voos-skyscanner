@@ -1,72 +1,93 @@
-import os
 import time
 import requests
 from bs4 import BeautifulSoup
 
-# Configurações fixas
+# Configurações iniciais
 ORIGEM = "CNF"
 DESTINO = "MCO"
 DATA_IDA = "2025-09-15"
 DATA_VOLTA = "2025-10-05"
 MAX_PRECO = 2000
-INTERVALO_MINUTOS = 10
 
-# Pegando variáveis de ambiente
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+# Telegram (com seus dados)
+TELEGRAM_TOKEN = "7478647827"
+TELEGRAM_CHAT_ID = "603459673"
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
-def enviar_mensagem(texto):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": texto}
+def enviar_mensagem(chat_id, texto):
+    url = f"{TELEGRAM_API_URL}/sendMessage"
+    payload = {"chat_id": chat_id, "text": texto}
     try:
         requests.post(url, json=payload)
     except Exception as e:
-        print(f"Erro ao enviar mensagem no Telegram: {e}")
+        print(f"Erro ao enviar mensagem: {e}")
 
 def buscar_voo():
     url = f"https://www.skyscanner.com.br/transport/flights/{ORIGEM}/{DESTINO}/{DATA_IDA}/{DATA_VOLTA}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
     }
+
     try:
         response = requests.get(url, headers=headers, timeout=30)
         if response.status_code != 200:
             print(f"Erro ao acessar Skyscanner: {response.status_code}")
             return None
+
         soup = BeautifulSoup(response.text, "html.parser")
         preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
         if not preco_span:
             print("⚠ Não foi possível encontrar o preço.")
             return None
+
         texto_preco = preco_span.get_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
         preco = float(texto_preco)
         return preco
+
     except Exception as e:
         print(f"Erro ao buscar preço: {e}")
         return None
 
+def processar_comandos(offset):
+    url = f"{TELEGRAM_API_URL}/getUpdates?timeout=10&offset={offset}"
+    try:
+        response = requests.get(url, timeout=15)
+        data = response.json()
+        for update in data.get("result", []):
+            update_id = update["update_id"]
+            message = update.get("message")
+            if message:
+                chat_id = message["chat"]["id"]
+                texto = message.get("text", "").lower()
+
+                if texto == "/start":
+                    enviar_mensagem(chat_id, "Olá! Sou seu bot de voos baratos. Use comandos para interagir.")
+                elif texto == "/configuracoes":
+                    msg = (
+                        f"Configurações atuais:\n"
+                        f"Origem: {ORIGEM}\n"
+                        f"Destino: {DESTINO}\n"
+                        f"Data ida: {DATA_IDA}\n"
+                        f"Data volta: {DATA_VOLTA}\n"
+                        f"Preço máximo: R$ {MAX_PRECO}"
+                    )
+                    enviar_mensagem(chat_id, msg)
+            offset = update_id + 1
+        return offset
+    except Exception as e:
+        print(f"Erro ao processar comandos: {e}")
+        return offset
+
 def main():
+    offset = 0
     while True:
-        print("🚀 Iniciando verificação de voos...")
+        offset = processar_comandos(offset)
         preco = buscar_voo()
+
         if preco is None:
             print("❌ Não foi possível obter o preço.")
         else:
             print(f"💰 Preço encontrado: R$ {preco:.2f}")
             if preco <= MAX_PRECO:
                 mensagem = (
-                    f"✈️ Voo barato encontrado!\n\n"
-                    f"🔁 Ida: {DATA_IDA}\n"
-                    f"🔁 Volta: {DATA_VOLTA}\n"
-                    f"💰 Preço: R$ {preco:.2f}\n"
-                    f"🔗 Link: https://www.skyscanner.com.br/transport/flights/{ORIGEM}/{DESTINO}/{DATA_IDA}/{DATA_VOLTA}/"
-                )
-                enviar_mensagem(mensagem)
-            else:
-                print("🔎 Preço acima do limite.")
-        print(f"⏳ Aguardando {INTERVALO_MINUTOS} minutos...\n")
-        time.sleep(INTERVALO_MINUTOS * 60)
-
-if __name__ == "__main__":
-    main()
-
+                    f"✈️ Voo barato encontrado
