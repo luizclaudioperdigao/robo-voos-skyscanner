@@ -1,10 +1,10 @@
 app = "robo-voos-skyscanner-q2anvq"
 
 [build]
-  image = "python:3.11-slim"
+  # build padrão, sem imagem externa
 
 [env]
-  # Suas variáveis de ambiente, se quiser
 
 [deploy]
   release_command = ""
+
