@@ -1,6 +1,7 @@
 import time
 import requests
 from bs4 import BeautifulSoup
+import os
 
 # Configurações iniciais (pode ser alterado pelo Telegram)
 ORIGEM = "CNF"
@@ -9,8 +10,11 @@ DATA_IDA = "2025-09-15"
 DATA_VOLTA = "2025-10-05"
 MAX_PRECO = 2000  # valor máximo em R$
 
-# Telegram (com seus dados)
-TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
+# Telegram (usa variável de ambiente)
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+if TELEGRAM_TOKEN is None:
+    raise ValueError("⚠️ A variável de ambiente TELEGRAM_TOKEN não está definida!")
+
 TELEGRAM_CHAT_ID = "603459673"
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
