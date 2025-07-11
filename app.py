@@ -9,9 +9,9 @@ DATA_IDA = "2025-09-15"
 DATA_VOLTA = "2025-10-05"
 MAX_PRECO = 2000  # valor máximo em R$
 
-# Telegram (com seus dados)
-TELEGRAM_TOKEN = "7478647827"
-TELEGRAM_CHAT_ID = "603459673"
+# Dados do Telegram
+TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
+TELEGRAM_CHAT_ID = "603459673"  # Substitua se necessário
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
 def enviar_mensagem(chat_id, texto):
