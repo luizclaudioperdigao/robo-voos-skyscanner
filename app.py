@@ -91,20 +91,30 @@ def processar_comandos():
             for update in updates:
                 offset = update["update_id"] + 1
 
-                # Botões inline
+                # Tratamento de callback_query (botões inline)
                 if "callback_query" in update:
                     callback = update["callback_query"]
                     data = callback["data"]
                     chat_id = callback["message"]["chat"]["id"]
-                    ESTADO_ATUALIZACAO = data
-                    perguntas = {
-                        "ORIGEM": "✈️ Qual é a nova origem? (Ex: CNF)",
-                        "DESTINO": "🏁 Qual é o novo destino? (Ex: MCO)",
-                        "IDA": "📅 Qual é a nova data de ida? (Ex: 2025-09-15)",
-                        "VOLTA": "📅 Qual é a nova data de volta? (Ex: 2025-10-05)",
-                        "PRECO": "💸 Qual é o novo preço máximo? (Ex: 2000)"
-                    }
-                    enviar_mensagem(chat_id, perguntas[data])
+
+                    if data == "PAUSAR":
+                        CONFIG["busca_pausada"] = True
+                        salvar_config()
+                        enviar_mensagem(chat_id, "⏸️ Busca pausada via botão.")
+                    elif data == "CONTINUAR":
+                        CONFIG["busca_pausada"] = False
+                        salvar_config()
+                        enviar_mensagem(chat_id, "▶️ Busca retomada via botão.")
+                    else:
+                        ESTADO_ATUALIZACAO = data
+                        perguntas = {
+                            "ORIGEM": "✈️ Qual é a nova origem? (Ex: CNF)",
+                            "DESTINO": "🏁 Qual é o novo destino? (Ex: MCO)",
+                            "IDA": "📅 Qual é a nova data de ida? (Ex: 2025-09-15)",
+                            "VOLTA": "📅 Qual é a nova data de volta? (Ex: 2025-10-05)",
+                            "PRECO": "💸 Qual é o novo preço máximo? (Ex: 2000)"
+                        }
+                        enviar_mensagem(chat_id, perguntas.get(data, "Opção desconhecida."))
                     continue
 
                 message = update.get("message")
@@ -186,25 +196,13 @@ def processar_comandos():
                 else:
                     enviar_mensagem(chat_id, "Comando não reconhecido. Use /configuracoes ou /status.")
 
-                # Callback para pausar/continuar via botões
-                if "callback_query" in update:
-                    data = update["callback_query"]["data"]
-                    chat_id = update["callback_query"]["message"]["chat"]["id"]
-                    if data == "PAUSAR":
-                        CONFIG["busca_pausada"] = True
-                        salvar_config()
-                        enviar_mensagem(chat_id, "⏸️ Busca pausada via botão.")
-                    elif data == "CONTINUAR":
-                        CONFIG["busca_pausada"] = False
-                        salvar_config()
-                        enviar_mensagem(chat_id, "▶️ Busca retomada via botão.")
-
         except Exception as e:
             print(f"Erro no loop de comandos: {e}")
         time.sleep(2)
 
 def loop_busca_voos():
     while True:
+        print("🌀 Iniciando nova busca de voos...")
         if CONFIG.get("busca_pausada"):
             print("🔴 Busca pausada. Aguardando retomada...")
         else:
