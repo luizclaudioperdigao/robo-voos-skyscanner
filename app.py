@@ -14,10 +14,10 @@ def carregar_config():
     else:
         return {
             "origem": "CNF",
-            "destino": "MIA",
-            "data_ida": "2025-08-18",
-            "data_volta": "2025-09-05",
-            "max_preco": 99999,
+            "destino": "MCO",
+            "data_ida": "2025-09-15",
+            "data_volta": "2025-10-05",
+            "max_preco": 2000,
             "busca_pausada": False,
             "estatisticas": {
                 "buscas_feitas": 0,
@@ -54,27 +54,31 @@ def enviar_mensagem(chat_id, texto, botoes=None):
 def buscar_voo():
     url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
     headers = {"User-Agent": "Mozilla/5.0"}
+
     try:
         r = requests.get(url, headers=headers, timeout=30)
         if r.status_code != 200:
             print(f"Erro HTTP {r.status_code} ao acessar Skyscanner")
             return None
 
-        # Salva o HTML completo
+        # Salva o HTML para debug
         with open("ultima_resposta.html", "w", encoding="utf-8") as f:
             f.write(r.text)
 
-        # Envia primeiras 50 linhas para análise no Telegram
-        trecho = "\n".join(r.text.splitlines()[:50])
-        enviar_mensagem(TELEGRAM_CHAT_ID, f"<b>[DEBUG]</b> Primeiras linhas do HTML:\n\n<pre>{trecho}</pre>")
+        # Envia as primeiras linhas do HTML para debug via Telegram
+        linhas = r.text.splitlines()
+        trecho = "\n".join(linhas[:50])  # Primeiras 50 linhas
+        enviar_mensagem(TELEGRAM_CHAT_ID, f"<b>[DEBUG]</b> Primeiras linhas do HTML:\n<pre>{trecho}</pre>")
 
         soup = BeautifulSoup(r.text, "html.parser")
         preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
         if not preco_span:
             print("⚠ Não achou preço no HTML")
             return None
+
         texto_preco = preco_span.get_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
         return float(texto_preco)
+
     except Exception as e:
         print(f"Erro ao buscar preço: {e}")
         return None
@@ -89,21 +93,25 @@ def processar_comandos():
                 url += f"?offset={offset}&timeout=30"
             else:
                 url += "?timeout=30"
+
             r = requests.get(url, timeout=40)
             updates = r.json().get("result", [])
 
             for update in updates:
                 offset = update["update_id"] + 1
+
                 if "callback_query" in update:
                     callback = update["callback_query"]
                     data = callback["data"]
                     chat_id = callback["message"]["chat"]["id"]
+
                     if data in ["PAUSAR", "CONTINUAR"]:
                         CONFIG["busca_pausada"] = (data == "PAUSAR")
                         salvar_config()
                         status = "⏸️ Busca pausada." if data == "PAUSAR" else "▶️ Busca retomada."
                         enviar_mensagem(chat_id, status)
                         continue
+
                     ESTADO_ATUALIZACAO = data
                     perguntas = {
                         "ORIGEM": "✈️ Qual é a nova origem? (Ex: CNF)",
@@ -118,6 +126,7 @@ def processar_comandos():
                 message = update.get("message")
                 if not message:
                     continue
+
                 chat_id = message["chat"]["id"]
                 texto = message.get("text", "").strip()
 
