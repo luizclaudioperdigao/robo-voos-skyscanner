@@ -4,64 +4,40 @@ from bs4 import BeautifulSoup
 from threading import Thread
 import json
 import os
-import logging
 
 CONFIG_PATH = "config.json"
-LOG_FILE = "bot.log"
 
-# Configura o logger para console e arquivo
-logger = logging.getLogger("RoboVoos")
-logger.setLevel(logging.DEBUG)
-formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-
-# Log no arquivo
-file_handler = logging.FileHandler(LOG_FILE)
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
-
-# Log no console
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
 
 def carregar_config():
     if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH, "r") as f:
-                config = json.load(f)
-                logger.info("Configuração carregada do arquivo.")
-                return config
-        except Exception as e:
-            logger.error(f"Erro ao carregar config.json: {e}")
-    # Config padrão se arquivo não existir ou erro
-    logger.info("Usando configuração padrão.")
-    return {
-        "origem": "CNF",
-        "destino": "MCO",
-        "data_ida": "2025-09-15",
-        "data_volta": "2025-10-05",
-        "max_preco": 2000,
-        "busca_pausada": False,
-        "estatisticas": {
-            "buscas_feitas": 0,
-            "ult_voo_baixo_preco": None
+        with open(CONFIG_PATH, "r") as f:
+            return json.load(f)
+    else:
+        return {
+            "origem": "CNF",
+            "destino": "MCO",
+            "data_ida": "2025-09-15",
+            "data_volta": "2025-10-05",
+            "max_preco": 5000,
+            "busca_pausada": False,
+            "estatisticas": {
+                "buscas_feitas": 0,
+                "ult_voo_baixo_preco": None
+            }
         }
-    }
+
 
 def salvar_config():
-    try:
-        with open(CONFIG_PATH, "w") as f:
-            json.dump(CONFIG, f, indent=2)
-        logger.info("Configuração salva.")
-    except Exception as e:
-        logger.error(f"Erro ao salvar config.json: {e}")
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(CONFIG, f, indent=2)
+
 
 CONFIG = carregar_config()
 ESTADO_ATUALIZACAO = None
-
 TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
 TELEGRAM_CHAT_ID = "603459673"
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+
 
 def enviar_mensagem(chat_id, texto, botoes=None):
     url = f"{TELEGRAM_API_URL}/sendMessage"
@@ -75,158 +51,63 @@ def enviar_mensagem(chat_id, texto, botoes=None):
     try:
         r = requests.post(url, json=payload, timeout=10)
         if not r.ok:
-            logger.warning(f"Erro ao enviar mensagem: {r.text}")
-        else:
-            logger.info(f"Mensagem enviada ao chat_id {chat_id}")
+            print(f"⚠️ Erro ao enviar mensagem: {r.text}")
     except Exception as e:
-        logger.error(f"Erro ao enviar mensagem: {e}")
+        print(f"Erro ao enviar mensagem: {e}")
+
 
 def buscar_voo():
     url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
     headers = {"User-Agent": "Mozilla/5.0"}
-    logger.info(f"Buscando voo: {url}")
     try:
         r = requests.get(url, headers=headers, timeout=30)
         if r.status_code != 200:
-            logger.error(f"Erro HTTP {r.status_code} ao acessar Skyscanner")
+            print(f"Erro HTTP {r.status_code} ao acessar Skyscanner")
             return None
+
+        # Salva o HTML bruto da página para análise
+        with open("pagina_skyscanner.html", "w", encoding="utf-8") as f:
+            f.write(r.text)
+
         soup = BeautifulSoup(r.text, "html.parser")
+
+        # Estratégia 1 - Classe antiga (pouco confiável)
         preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
-        if not preco_span:
-            logger.warning("Não achou preço no HTML da página.")
-            return None
-        texto_preco = preco_span.get_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
-        preco = float(texto_preco)
-        logger.info(f"Preço encontrado: R$ {preco:.2f}")
-        return preco
-    except Exception as e:
-        logger.error(f"Erro ao buscar preço: {e}")
+        if preco_span:
+            texto_preco = preco_span.get_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
+            print(f"[html antigo] Preço encontrado: R$ {texto_preco}")
+            return float(texto_preco)
+
+        # Estratégia 2 - Buscar qualquer preço estilo R$ XXXX,XX
+        possiveis_precos = soup.find_all(text=lambda t: "R$" in t and "," in t)
+        for texto in possiveis_precos:
+            try:
+                valor = texto.strip().replace("R$", "").replace(".", "").replace(",", ".")
+                preco = float(valor)
+                print(f"[regex] Preço extraído: R$ {preco}")
+                return preco
+            except:
+                continue
+
+        print("❌ Nenhum preço encontrado no HTML.")
         return None
 
-def processar_comandos():
-    global ESTADO_ATUALIZACAO
-    offset = None
-    while True:
-        try:
-            url = f"{TELEGRAM_API_URL}/getUpdates"
-            if offset:
-                url += f"?offset={offset}&timeout=30"
-            else:
-                url += "?timeout=30"
+    except Exception as e:
+        print(f"Erro ao buscar preço: {e}")
+        return None
 
-            r = requests.get(url, timeout=40)
-            updates = r.json().get("result", [])
-
-            for update in updates:
-                offset = update["update_id"] + 1
-
-                if "callback_query" in update:
-                    callback = update["callback_query"]
-                    data = callback["data"]
-                    chat_id = callback["message"]["chat"]["id"]
-
-                    if data in ["PAUSAR", "CONTINUAR"]:
-                        CONFIG["busca_pausada"] = (data == "PAUSAR")
-                        salvar_config()
-                        status = "⏸️ Busca pausada." if data == "PAUSAR" else "▶️ Busca retomada."
-                        enviar_mensagem(chat_id, status)
-                        logger.info(f"Busca pausada alterada via botão para: {CONFIG['busca_pausada']}")
-                        continue
-
-                    ESTADO_ATUALIZACAO = data
-                    perguntas = {
-                        "ORIGEM": "✈️ Qual é a nova origem? (Ex: CNF)",
-                        "DESTINO": "🏁 Qual é o novo destino? (Ex: MCO)",
-                        "IDA": "📅 Qual é a nova data de ida? (Ex: 2025-09-15)",
-                        "VOLTA": "📅 Qual é a nova data de volta? (Ex: 2025-10-05)",
-                        "PRECO": "💸 Qual é o novo preço máximo? (Ex: 2000)"
-                    }
-                    enviar_mensagem(chat_id, perguntas[data])
-                    logger.info(f"Solicitou alteração de configuração: {data}")
-                    continue
-
-                message = update.get("message")
-                if not message:
-                    continue
-
-                chat_id = message["chat"]["id"]
-                texto = message.get("text", "").strip()
-
-                if ESTADO_ATUALIZACAO:
-                    try:
-                        if ESTADO_ATUALIZACAO == "ORIGEM":
-                            CONFIG["origem"] = texto.upper()
-                        elif ESTADO_ATUALIZACAO == "DESTINO":
-                            CONFIG["destino"] = texto.upper()
-                        elif ESTADO_ATUALIZACAO == "IDA":
-                            CONFIG["data_ida"] = texto
-                        elif ESTADO_ATUALIZACAO == "VOLTA":
-                            CONFIG["data_volta"] = texto
-                        elif ESTADO_ATUALIZACAO == "PRECO":
-                            CONFIG["max_preco"] = float(texto)
-                        salvar_config()
-                        enviar_mensagem(chat_id, "✅ Configuração atualizada!")
-                        logger.info(f"Configuração {ESTADO_ATUALIZACAO} atualizada para: {texto}")
-                    except Exception as e:
-                        enviar_mensagem(chat_id, "❌ Erro. Verifique o valor.")
-                        logger.error(f"Erro ao atualizar configuração {ESTADO_ATUALIZACAO}: {e}")
-                    ESTADO_ATUALIZACAO = None
-                    continue
-
-                if texto == "/start":
-                    enviar_mensagem(chat_id, "Olá! Sou seu bot de voos baratos. Use /configuracoes para editar.")
-                    logger.info("Recebeu comando /start")
-                elif texto == "/configuracoes":
-                    msg = (
-                        f"<b>🔧 Configurações:</b>\n"
-                        f"• Origem: {CONFIG['origem']}\n"
-                        f"• Destino: {CONFIG['destino']}\n"
-                        f"• Ida: {CONFIG['data_ida']}\n"
-                        f"• Volta: {CONFIG['data_volta']}\n"
-                        f"• Máximo: R$ {CONFIG['max_preco']:.2f}\n"
-                        f"• Busca pausada: {'Sim' if CONFIG['busca_pausada'] else 'Não'}"
-                    )
-                    botoes = [
-                        [{"text": "✏️ Origem", "callback_data": "ORIGEM"},
-                         {"text": "✏️ Destino", "callback_data": "DESTINO"}],
-                        [{"text": "📅 Ida", "callback_data": "IDA"},
-                         {"text": "📅 Volta", "callback_data": "VOLTA"}],
-                        [{"text": "💸 Preço", "callback_data": "PRECO"}],
-                        [{"text": "⏸️ Pausar", "callback_data": "PAUSAR"},
-                         {"text": "▶️ Continuar", "callback_data": "CONTINUAR"}]
-                    ]
-                    enviar_mensagem(chat_id, msg, botoes)
-                    logger.info("Mostrou configurações para o usuário")
-                elif texto == "/status":
-                    est = CONFIG.get("estatisticas", {})
-                    ult = est.get("ult_voo_baixo_preco")
-                    msg = (
-                        f"<b>📊 Status:</b>\n"
-                        f"• Pausado: {'Sim' if CONFIG['busca_pausada'] else 'Não'}\n"
-                        f"• Buscas feitas: {est.get('buscas_feitas', 0)}\n"
-                        f"• Último voo barato: {f'R$ {ult:.2f}' if ult else 'Nenhum ainda'}"
-                    )
-                    enviar_mensagem(chat_id, msg)
-                    logger.info("Mostrou status para o usuário")
-                else:
-                    enviar_mensagem(chat_id, "Comando não reconhecido. Use /configuracoes ou /status.")
-                    logger.info(f"Comando desconhecido recebido: {texto}")
-
-        except Exception as e:
-            logger.error(f"Erro no loop de comandos: {e}")
-        time.sleep(2)
 
 def loop_busca_voos():
     while True:
         if CONFIG.get("busca_pausada"):
-            logger.info("Busca pausada.")
+            print("🔴 Busca pausada.")
         else:
             preco = buscar_voo()
-            CONFIG["estatisticas"]["buscas_feitas"] = CONFIG["estatisticas"].get("buscas_feitas", 0) + 1
+            CONFIG["estatisticas"]["buscas_feitas"] += 1
             if preco is None:
-                logger.warning("Preço não encontrado.")
+                print("❌ Preço não encontrado.")
             else:
-                logger.info(f"Preço atual: R$ {preco:.2f}")
+                print(f"💰 Preço atual: R$ {preco:.2f}")
                 if preco <= CONFIG["max_preco"]:
                     CONFIG["estatisticas"]["ult_voo_baixo_preco"] = preco
                     salvar_config()
@@ -239,16 +120,16 @@ def loop_busca_voos():
                     link = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/"
                     botoes = [[{"text": "🔗 Comprar agora", "url": link}]]
                     enviar_mensagem(TELEGRAM_CHAT_ID, mensagem, botoes)
-                    logger.info("Alerta de voo barato enviado.")
                 else:
-                    logger.info("Preço acima do limite.")
+                    print("🔎 Acima do limite.")
         salvar_config()
-        logger.info("Esperando 60 segundos para próxima busca...\n")
+        print("⏳ Esperando 60s...\n")
         time.sleep(60)
 
+
 def main():
-    Thread(target=processar_comandos, daemon=True).start()
     loop_busca_voos()
+
 
 if __name__ == "__main__":
     main()
