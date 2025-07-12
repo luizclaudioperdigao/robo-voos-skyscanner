@@ -6,6 +6,7 @@ import json
 import os
 
 CONFIG_PATH = "config.json"
+HTML_DEBUG_FILE = "ultimo_html.html"
 
 def carregar_config():
     if os.path.exists(CONFIG_PATH):
@@ -53,8 +54,6 @@ def enviar_mensagem(chat_id, texto, botoes=None):
         print(f"Erro ao enviar mensagem: {e}")
 
 def buscar_voo():
-    enviar_mensagem(TELEGRAM_CHAT_ID, "🔍 Iniciando busca de voo...")  # Mensagem de debug inicial
-
     url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
@@ -66,8 +65,9 @@ def buscar_voo():
 
         html = r.text
 
-        # Envia as primeiras 1000 caracteres do HTML para debug
-        enviar_mensagem(TELEGRAM_CHAT_ID, f"<b>[DEBUG] HTML capturado (primeiros 1000 chars):</b>\n<pre>{html[:1000]}</pre>")
+        # Salva o HTML no arquivo para debug local
+        with open(HTML_DEBUG_FILE, "w", encoding="utf-8") as f:
+            f.write(html)
 
         soup = BeautifulSoup(html, "html.parser")
         preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
