@@ -58,14 +58,13 @@ def buscar_voo():
     try:
         r = requests.get(url, headers=headers, timeout=30)
         if r.status_code != 200:
-            print(f"Erro HTTP {r.status_code} ao acessar Skyscanner")
             enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro HTTP {r.status_code} ao acessar Skyscanner")
             return None
 
         html = r.text
 
-        # Envia o HTML para debug no Telegram, primeiros 1000 caracteres
-        enviar_mensagem(TELEGRAM_CHAT_ID, f"<b>[DEBUG] HTML capturado (primeiros 1000 caracteres):</b>\n<pre>{html[:1000]}</pre>")
+        # Envia os primeiros 1000 caracteres do HTML para debug
+        enviar_mensagem(TELEGRAM_CHAT_ID, f"<b>[DEBUG] HTML capturado (primeiros 1000 chars):</b>\n<pre>{html[:1000]}</pre>")
 
         soup = BeautifulSoup(html, "html.parser")
         preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
@@ -79,7 +78,6 @@ def buscar_voo():
         return preco
 
     except Exception as e:
-        print(f"Erro ao buscar preço: {e}")
         enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro ao buscar preço: {e}")
         return None
 
