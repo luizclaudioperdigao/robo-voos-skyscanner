@@ -64,12 +64,18 @@ def buscar_voo():
 
         html = r.text
 
-        # Envia as primeiras 1000 caracteres do HTML para debug
+        # Debug: envia primeiros 1000 caracteres do HTML para ajudar na análise
         enviar_mensagem(TELEGRAM_CHAT_ID, f"<b>[DEBUG] HTML capturado (primeiros 1000 chars):</b>\n<pre>{html[:1000]}</pre>")
 
         soup = BeautifulSoup(html, "html.parser")
-        preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
 
+        # Tentar encontrar preço com seletor clássico
+        preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
+        
+        # Se não encontrar, tenta um seletor alternativo (mais genérico)
+        if not preco_span:
+            preco_span = soup.find("span", class_="price")
+        
         if not preco_span:
             enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou o preço no HTML. Talvez a página mudou ou o seletor está incorreto.")
             return None
