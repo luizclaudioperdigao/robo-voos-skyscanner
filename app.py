@@ -9,28 +9,39 @@ CONFIG_PATH = "config.json"
 
 def carregar_config():
     if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r") as f:
-            return json.load(f)
+        try:
+            with open(CONFIG_PATH, "r") as f:
+                config = json.load(f)
+        except Exception as e:
+            print(f"Erro ao carregar config.json: {e}")
+            config = {}
     else:
-        return {
-            "origem": "CNF",
-            "destino": "MCO",
-            "data_ida": "2025-09-15",
-            "data_volta": "2025-10-05",
-            "max_preco": 2000,
-            "busca_pausada": False,
-            "estatisticas": {
-                "buscas_feitas": 0,
-                "ult_voo_baixo_preco": None
-            }
-        }
+        config = {}
+
+    # Valores padrão
+    config.setdefault("origem", "CNF")
+    config.setdefault("destino", "MCO")
+    config.setdefault("data_ida", "2025-09-15")
+    config.setdefault("data_volta", "2025-10-05")
+    config.setdefault("max_preco", 2000.0)
+    config.setdefault("busca_pausada", False)
+    config.setdefault("estatisticas", {})
+    config["estatisticas"].setdefault("buscas_feitas", 0)
+    config["estatisticas"].setdefault("ult_voo_baixo_preco", None)
+
+    return config
 
 def salvar_config():
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(CONFIG, f, indent=2)
+    try:
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(CONFIG, f, indent=2)
+    except Exception as e:
+        print(f"Erro ao salvar config.json: {e}")
 
 CONFIG = carregar_config()
 ESTADO_ATUALIZACAO = None
+
+# Coloque seu token e chat id aqui
 TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
 TELEGRAM_CHAT_ID = "603459673"
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
@@ -40,7 +51,8 @@ def enviar_mensagem(chat_id, texto, botoes=None):
     payload = {
         "chat_id": chat_id,
         "text": texto,
-        "parse_mode": "HTML"
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
     }
     if botoes:
         payload["reply_markup"] = {"inline_keyboard": botoes}
@@ -48,8 +60,11 @@ def enviar_mensagem(chat_id, texto, botoes=None):
         r = requests.post(url, json=payload, timeout=10)
         if not r.ok:
             print(f"⚠️ Erro ao enviar mensagem: {r.text}")
+            return False
+        return True
     except Exception as e:
         print(f"Erro ao enviar mensagem: {e}")
+        return False
 
 def buscar_voo():
     url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
@@ -60,12 +75,27 @@ def buscar_voo():
             print(f"Erro HTTP {r.status_code} ao acessar Skyscanner")
             return None
         soup = BeautifulSoup(r.text, "html.parser")
+        
+        # Tentativa principal de encontrar o preço
         preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
-        if not preco_span:
+        if preco_span:
+            texto_preco = preco_span.get_text()
+        else:
+            # Fallback: procura por outro padrão possível (ajuste se quiser)
+            texto_preco = None
+            for span in soup.find_all("span"):
+                txt = span.get_text()
+                if txt and "R$" in txt:
+                    texto_preco = txt
+                    break
+        
+        if not texto_preco:
             print("⚠ Não achou preço no HTML")
             return None
-        texto_preco = preco_span.get_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
-        return float(texto_preco)
+        
+        preco_str = texto_preco.replace("R$", "").replace(".", "").replace(",", ".").strip()
+        preco_float = float(preco_str)
+        return preco_float
     except Exception as e:
         print(f"Erro ao buscar preço: {e}")
         return None
@@ -82,7 +112,16 @@ def processar_comandos():
                 url += "?timeout=30"
 
             r = requests.get(url, timeout=40)
+            if not r.ok:
+                print(f"Erro ao obter updates: {r.text}")
+                time.sleep(5)
+                continue
+
             updates = r.json().get("result", [])
+            if not updates:
+                # Nenhuma atualização
+                time.sleep(2)
+                continue
 
             for update in updates:
                 offset = update["update_id"] + 1
@@ -131,11 +170,13 @@ def processar_comandos():
                             CONFIG["max_preco"] = float(texto)
                         salvar_config()
                         enviar_mensagem(chat_id, "✅ Configuração atualizada!")
-                    except:
-                        enviar_mensagem(chat_id, "❌ Erro. Verifique o valor.")
+                    except Exception as e:
+                        print(f"Erro ao atualizar configuração: {e}")
+                        enviar_mensagem(chat_id, "❌ Erro. Verifique o valor informado.")
                     ESTADO_ATUALIZACAO = None
                     continue
 
+                # Comandos gerais
                 if texto == "/start":
                     enviar_mensagem(chat_id, "Olá! Sou seu bot de voos baratos. Use /configuracoes para editar.")
                 elif texto == "/configuracoes":
@@ -168,9 +209,21 @@ def processar_comandos():
                         f"• Último voo barato: {f'R$ {ult:.2f}' if ult else 'Nenhum ainda'}"
                     )
                     enviar_mensagem(chat_id, msg)
+                elif texto == "/pausar":
+                    CONFIG["busca_pausada"] = True
+                    salvar_config()
+                    enviar_mensagem(chat_id, "⏸️ Busca pausada. O bot não fará buscas até você enviar /continuar.")
+                elif texto == "/continuar":
+                    CONFIG["busca_pausada"] = False
+                    salvar_config()
+                    enviar_mensagem(chat_id, "▶️ Busca retomada. O bot voltará a fazer buscas.")
+                else:
+                    enviar_mensagem(chat_id, "Comando não reconhecido. Use /configuracoes ou /status.")
         except Exception as e:
             print(f"Erro no loop de comandos: {e}")
-        time.sleep(2)
+            # Reseta offset para evitar loop travado
+            offset = None
+            time.sleep(5)
 
 def loop_busca_voos():
     while True:
@@ -178,7 +231,7 @@ def loop_busca_voos():
             print("🔴 Busca pausada.")
         else:
             preco = buscar_voo()
-            CONFIG["estatisticas"]["buscas_feitas"] += 1
+            CONFIG["estatisticas"]["buscas_feitas"] = CONFIG["estatisticas"].get("buscas_feitas", 0) + 1
             if preco is None:
                 print("❌ Preço não encontrado.")
             else:
@@ -198,10 +251,11 @@ def loop_busca_voos():
                 else:
                     print("🔎 Acima do limite.")
         salvar_config()
-        print("⏳ Esperando 60s...\n")
+        print("⏳ Esperando 60 segundos...\n")
         time.sleep(60)
 
 def main():
+    print("🚀 Bot iniciado!")
     Thread(target=processar_comandos, daemon=True).start()
     loop_busca_voos()
 
