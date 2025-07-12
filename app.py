@@ -4,7 +4,6 @@ from bs4 import BeautifulSoup
 from threading import Thread
 import json
 import os
-from datetime import datetime
 
 CONFIG_PATH = "config.json"
 
@@ -32,6 +31,7 @@ def salvar_config():
 
 CONFIG = carregar_config()
 ESTADO_ATUALIZACAO = None
+
 TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
 TELEGRAM_CHAT_ID = "603459673"
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
@@ -52,33 +52,30 @@ def enviar_mensagem(chat_id, texto, botoes=None):
     except Exception as e:
         print(f"Erro ao enviar mensagem: {e}")
 
-def salvar_html_debug(html):
-    now = datetime.now().strftime("%Y%m%d_%H%M%S")
-    try:
-        with open(f"debug_{now}.html", "w", encoding="utf-8") as f:
-            f.write(html)
-    except Exception as e:
-        print(f"Erro ao salvar HTML: {e}")
-
 def buscar_voo():
     url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         r = requests.get(url, headers=headers, timeout=30)
+
+        # 🧪 Salva HTML para debug
+        with open("ultima_resposta.html", "w", encoding="utf-8") as f:
+            f.write(r.text)
+
         if r.status_code != 200:
             print(f"Erro HTTP {r.status_code} ao acessar Skyscanner")
             return None
+
         soup = BeautifulSoup(r.text, "html.parser")
-
-        # Salva HTML para depuração se necessário
-        salvar_html_debug(r.text)
-
         preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
+
         if not preco_span:
-            print("⚠ Não achou preço no HTML.")
+            print("⚠️ Preço não encontrado no HTML.")
             return None
+
         texto_preco = preco_span.get_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
         return float(texto_preco)
+
     except Exception as e:
         print(f"Erro ao buscar preço: {e}")
         return None
@@ -114,11 +111,11 @@ def processar_comandos():
 
                     ESTADO_ATUALIZACAO = data
                     perguntas = {
-                        "ORIGEM": "✈️ Qual é a nova origem? (Ex: CNF)",
-                        "DESTINO": "🏁 Qual é o novo destino? (Ex: MCO)",
-                        "IDA": "📅 Qual é a nova data de ida? (Ex: 2025-09-15)",
-                        "VOLTA": "📅 Qual é a nova data de volta? (Ex: 2025-10-05)",
-                        "PRECO": "💸 Qual é o novo preço máximo? (Ex: 2000)"
+                        "ORIGEM": "✈️ Nova origem? (Ex: CNF)",
+                        "DESTINO": "🏁 Novo destino? (Ex: MCO)",
+                        "IDA": "📅 Nova data de ida? (Ex: 2025-09-15)",
+                        "VOLTA": "📅 Nova data de volta? (Ex: 2025-10-05)",
+                        "PRECO": "💸 Novo preço máximo? (Ex: 2000)"
                     }
                     enviar_mensagem(chat_id, perguntas[data])
                     continue
