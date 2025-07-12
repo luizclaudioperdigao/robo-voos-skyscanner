@@ -57,33 +57,25 @@ def buscar_voo():
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
         r = requests.get(url, headers=headers, timeout=30)
-        print(f"Status HTTP: {r.status_code}")
         if r.status_code != 200:
             print(f"Erro HTTP {r.status_code} ao acessar Skyscanner")
             enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro HTTP {r.status_code} ao acessar Skyscanner")
             return None
 
         html = r.text
-        print(f"HTML recebido com tamanho: {len(html)}")
 
         # Envia as primeiras 1000 caracteres do HTML para debug
-        try:
-            enviar_mensagem(TELEGRAM_CHAT_ID, f"<b>[DEBUG] HTML capturado (primeiros 1000 chars):</b>\n<pre>{html[:1000]}</pre>")
-            print("Mensagem de debug enviada")
-        except Exception as e:
-            print(f"Erro ao enviar mensagem de debug: {e}")
+        enviar_mensagem(TELEGRAM_CHAT_ID, f"<b>[DEBUG] HTML capturado (primeiros 1000 chars):</b>\n<pre>{html[:1000]}</pre>")
 
         soup = BeautifulSoup(html, "html.parser")
         preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
 
         if not preco_span:
-            print("⚠️ Não encontrou o preço no HTML.")
             enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou o preço no HTML. Talvez a página mudou ou o seletor está incorreto.")
             return None
 
         texto_preco = preco_span.get_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
         preco = float(texto_preco)
-        print(f"Preço encontrado: {preco}")
         return preco
 
     except Exception as e:
