@@ -63,13 +63,26 @@ def buscar_voo():
         if r.status_code != 200:
             print(f"Erro HTTP {r.status_code} ao acessar Skyscanner")
             return None
+
+        # Salva o HTML pra análise
+        with open("pagina.html", "w", encoding="utf-8") as f:
+            f.write(r.text)
+        print("HTML da página salvo em pagina.html")
+
         soup = BeautifulSoup(r.text, "html.parser")
+
         preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
         if not preco_span:
             print("⚠ Não achou preço no HTML")
             return None
+
+        # Imprime o trecho do HTML onde encontrou o preço
+        print("Trecho do HTML do preço encontrado:")
+        print(preco_span.prettify())
+
         texto_preco = preco_span.get_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
         return float(texto_preco)
+
     except Exception as e:
         print(f"Erro ao buscar preço: {e}")
         return None
@@ -91,30 +104,20 @@ def processar_comandos():
             for update in updates:
                 offset = update["update_id"] + 1
 
-                # Tratamento de callback_query (botões inline)
+                # Botões inline
                 if "callback_query" in update:
                     callback = update["callback_query"]
                     data = callback["data"]
                     chat_id = callback["message"]["chat"]["id"]
-
-                    if data == "PAUSAR":
-                        CONFIG["busca_pausada"] = True
-                        salvar_config()
-                        enviar_mensagem(chat_id, "⏸️ Busca pausada via botão.")
-                    elif data == "CONTINUAR":
-                        CONFIG["busca_pausada"] = False
-                        salvar_config()
-                        enviar_mensagem(chat_id, "▶️ Busca retomada via botão.")
-                    else:
-                        ESTADO_ATUALIZACAO = data
-                        perguntas = {
-                            "ORIGEM": "✈️ Qual é a nova origem? (Ex: CNF)",
-                            "DESTINO": "🏁 Qual é o novo destino? (Ex: MCO)",
-                            "IDA": "📅 Qual é a nova data de ida? (Ex: 2025-09-15)",
-                            "VOLTA": "📅 Qual é a nova data de volta? (Ex: 2025-10-05)",
-                            "PRECO": "💸 Qual é o novo preço máximo? (Ex: 2000)"
-                        }
-                        enviar_mensagem(chat_id, perguntas.get(data, "Opção desconhecida."))
+                    ESTADO_ATUALIZACAO = data
+                    perguntas = {
+                        "ORIGEM": "✈️ Qual é a nova origem? (Ex: CNF)",
+                        "DESTINO": "🏁 Qual é o novo destino? (Ex: MCO)",
+                        "IDA": "📅 Qual é a nova data de ida? (Ex: 2025-09-15)",
+                        "VOLTA": "📅 Qual é a nova data de volta? (Ex: 2025-10-05)",
+                        "PRECO": "💸 Qual é o novo preço máximo? (Ex: 2000)"
+                    }
+                    enviar_mensagem(chat_id, perguntas[data])
                     continue
 
                 message = update.get("message")
@@ -169,8 +172,10 @@ def processar_comandos():
                             {"text": "💸 Alterar Preço", "callback_data": "PRECO"}
                         ],
                         [
-                            {"text": "⏸️ Pausar busca", "callback_data": "PAUSAR"},
-                            {"text": "▶️ Continuar busca", "callback_data": "CONTINUAR"}
+                            [
+                                {"text": "⏸️ Pausar busca", "callback_data": "PAUSAR"},
+                                {"text": "▶️ Continuar busca", "callback_data": "CONTINUAR"}
+                            ]
                         ]
                     ]
                     enviar_mensagem(chat_id, msg, botoes)
@@ -196,13 +201,25 @@ def processar_comandos():
                 else:
                     enviar_mensagem(chat_id, "Comando não reconhecido. Use /configuracoes ou /status.")
 
+                # Callback para pausar/continuar via botões
+                if "callback_query" in update:
+                    data = update["callback_query"]["data"]
+                    chat_id = update["callback_query"]["message"]["chat"]["id"]
+                    if data == "PAUSAR":
+                        CONFIG["busca_pausada"] = True
+                        salvar_config()
+                        enviar_mensagem(chat_id, "⏸️ Busca pausada via botão.")
+                    elif data == "CONTINUAR":
+                        CONFIG["busca_pausada"] = False
+                        salvar_config()
+                        enviar_mensagem(chat_id, "▶️ Busca retomada via botão.")
+
         except Exception as e:
             print(f"Erro no loop de comandos: {e}")
         time.sleep(2)
 
 def loop_busca_voos():
     while True:
-        print("🌀 Iniciando nova busca de voos...")
         if CONFIG.get("busca_pausada"):
             print("🔴 Busca pausada. Aguardando retomada...")
         else:
