@@ -53,6 +53,8 @@ def enviar_mensagem(chat_id, texto, botoes=None):
         print(f"Erro ao enviar mensagem: {e}")
 
 def buscar_voo():
+    enviar_mensagem(TELEGRAM_CHAT_ID, "🔍 Iniciando busca de voo...")  # Mensagem de debug inicial
+
     url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
