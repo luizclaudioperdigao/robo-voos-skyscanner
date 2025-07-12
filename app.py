@@ -14,10 +14,10 @@ def carregar_config():
     else:
         return {
             "origem": "CNF",
-            "destino": "MCO",
-            "data_ida": "2025-09-15",
-            "data_volta": "2025-10-05",
-            "max_preco": 2000,
+            "destino": "MIA",
+            "data_ida": "2025-08-18",
+            "data_volta": "2025-09-05",
+            "max_preco": 99999,
             "busca_pausada": False,
             "estatisticas": {
                 "buscas_feitas": 0,
@@ -31,7 +31,6 @@ def salvar_config():
 
 CONFIG = carregar_config()
 ESTADO_ATUALIZACAO = None
-
 TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
 TELEGRAM_CHAT_ID = "603459673"
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
@@ -57,25 +56,25 @@ def buscar_voo():
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         r = requests.get(url, headers=headers, timeout=30)
-
-        # 🧪 Salva HTML para debug
-        with open("ultima_resposta.html", "w", encoding="utf-8") as f:
-            f.write(r.text)
-
         if r.status_code != 200:
             print(f"Erro HTTP {r.status_code} ao acessar Skyscanner")
             return None
 
+        # Salva o HTML completo
+        with open("ultima_resposta.html", "w", encoding="utf-8") as f:
+            f.write(r.text)
+
+        # Envia primeiras 50 linhas para análise no Telegram
+        trecho = "\n".join(r.text.splitlines()[:50])
+        enviar_mensagem(TELEGRAM_CHAT_ID, f"<b>[DEBUG]</b> Primeiras linhas do HTML:\n\n<pre>{trecho}</pre>")
+
         soup = BeautifulSoup(r.text, "html.parser")
         preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
-
         if not preco_span:
-            print("⚠️ Preço não encontrado no HTML.")
+            print("⚠ Não achou preço no HTML")
             return None
-
         texto_preco = preco_span.get_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
         return float(texto_preco)
-
     except Exception as e:
         print(f"Erro ao buscar preço: {e}")
         return None
@@ -90,32 +89,28 @@ def processar_comandos():
                 url += f"?offset={offset}&timeout=30"
             else:
                 url += "?timeout=30"
-
             r = requests.get(url, timeout=40)
             updates = r.json().get("result", [])
 
             for update in updates:
                 offset = update["update_id"] + 1
-
                 if "callback_query" in update:
                     callback = update["callback_query"]
                     data = callback["data"]
                     chat_id = callback["message"]["chat"]["id"]
-
                     if data in ["PAUSAR", "CONTINUAR"]:
                         CONFIG["busca_pausada"] = (data == "PAUSAR")
                         salvar_config()
                         status = "⏸️ Busca pausada." if data == "PAUSAR" else "▶️ Busca retomada."
                         enviar_mensagem(chat_id, status)
                         continue
-
                     ESTADO_ATUALIZACAO = data
                     perguntas = {
-                        "ORIGEM": "✈️ Nova origem? (Ex: CNF)",
-                        "DESTINO": "🏁 Novo destino? (Ex: MCO)",
-                        "IDA": "📅 Nova data de ida? (Ex: 2025-09-15)",
-                        "VOLTA": "📅 Nova data de volta? (Ex: 2025-10-05)",
-                        "PRECO": "💸 Novo preço máximo? (Ex: 2000)"
+                        "ORIGEM": "✈️ Qual é a nova origem? (Ex: CNF)",
+                        "DESTINO": "🏁 Qual é o novo destino? (Ex: MCO)",
+                        "IDA": "📅 Qual é a nova data de ida? (Ex: 2025-09-15)",
+                        "VOLTA": "📅 Qual é a nova data de volta? (Ex: 2025-10-05)",
+                        "PRECO": "💸 Qual é o novo preço máximo? (Ex: 2000)"
                     }
                     enviar_mensagem(chat_id, perguntas[data])
                     continue
@@ -123,7 +118,6 @@ def processar_comandos():
                 message = update.get("message")
                 if not message:
                     continue
-
                 chat_id = message["chat"]["id"]
                 texto = message.get("text", "").strip()
 
