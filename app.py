@@ -14,10 +14,10 @@ def carregar_config():
     else:
         return {
             "origem": "CNF",
-            "destino": "MCO",
-            "data_ida": "2025-09-15",
-            "data_volta": "2025-10-05",
-            "max_preco": 2000,
+            "destino": "MIA",
+            "data_ida": "2025-08-18",
+            "data_volta": "2025-09-05",
+            "max_preco": 99999,
             "busca_pausada": False,
             "estatisticas": {
                 "buscas_feitas": 0,
@@ -31,6 +31,7 @@ def salvar_config():
 
 CONFIG = carregar_config()
 ESTADO_ATUALIZACAO = None
+
 TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
 TELEGRAM_CHAT_ID = "603459673"
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
@@ -53,34 +54,33 @@ def enviar_mensagem(chat_id, texto, botoes=None):
 
 def buscar_voo():
     url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
-    headers = {"User-Agent": "Mozilla/5.0"}
-
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
         r = requests.get(url, headers=headers, timeout=30)
         if r.status_code != 200:
             print(f"Erro HTTP {r.status_code} ao acessar Skyscanner")
+            enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro HTTP {r.status_code} ao acessar Skyscanner")
             return None
 
-        # Salva o HTML para debug
-        with open("ultima_resposta.html", "w", encoding="utf-8") as f:
-            f.write(r.text)
+        html = r.text
 
-        # Envia as primeiras linhas do HTML para debug via Telegram
-        linhas = r.text.splitlines()
-        trecho = "\n".join(linhas[:50])  # Primeiras 50 linhas
-        enviar_mensagem(TELEGRAM_CHAT_ID, f"<b>[DEBUG]</b> Primeiras linhas do HTML:\n<pre>{trecho}</pre>")
+        # Envia as primeiras 1000 caracteres do HTML para debug
+        enviar_mensagem(TELEGRAM_CHAT_ID, f"<b>[DEBUG] HTML capturado (primeiros 1000 chars):</b>\n<pre>{html[:1000]}</pre>")
 
-        soup = BeautifulSoup(r.text, "html.parser")
+        soup = BeautifulSoup(html, "html.parser")
         preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
+
         if not preco_span:
-            print("⚠ Não achou preço no HTML")
+            enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou o preço no HTML. Talvez a página mudou ou o seletor está incorreto.")
             return None
 
         texto_preco = preco_span.get_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
-        return float(texto_preco)
+        preco = float(texto_preco)
+        return preco
 
     except Exception as e:
         print(f"Erro ao buscar preço: {e}")
+        enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro ao buscar preço: {e}")
         return None
 
 def processar_comandos():
