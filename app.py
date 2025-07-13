@@ -7,7 +7,6 @@ import os
 
 CONFIG_PATH = "config.json"
 
-
 def carregar_config():
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r") as f:
@@ -15,10 +14,10 @@ def carregar_config():
     else:
         return {
             "origem": "CNF",
-            "destino": "MIA",
-            "data_ida": "2025-08-18",
-            "data_volta": "2025-09-05",
-            "max_preco": 99999,
+            "destino": "MCO",
+            "data_ida": "2025-09-15",
+            "data_volta": "2025-10-05",
+            "max_preco": 2000,
             "busca_pausada": False,
             "estatisticas": {
                 "buscas_feitas": 0,
@@ -26,19 +25,16 @@ def carregar_config():
             }
         }
 
-
 def salvar_config():
     with open(CONFIG_PATH, "w") as f:
         json.dump(CONFIG, f, indent=2)
 
-
 CONFIG = carregar_config()
 ESTADO_ATUALIZACAO = None
 
-TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
-TELEGRAM_CHAT_ID = "603459673"
+TELEGRAM_TOKEN = "SEU_TOKEN_AQUI"
+TELEGRAM_CHAT_ID = "SEU_CHAT_ID_AQUI"
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-
 
 def enviar_mensagem(chat_id, texto, botoes=None):
     url = f"{TELEGRAM_API_URL}/sendMessage"
@@ -56,32 +52,38 @@ def enviar_mensagem(chat_id, texto, botoes=None):
     except Exception as e:
         print(f"Erro ao enviar mensagem: {e}")
 
-
 def buscar_voo():
-    url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    # Monta a URL Kayak para busca de voos
+    url = (
+        f"https://www.kayak.com.br/flights/"
+        f"{CONFIG['origem']}-{CONFIG['destino']}/"
+        f"{CONFIG['data_ida']}/"
+        f"{CONFIG['data_volta']}"
+        f"?sort=bestflight_a"
+    )
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    }
     try:
         r = requests.get(url, headers=headers, timeout=30)
         if r.status_code != 200:
-            print(f"Erro HTTP {r.status_code} ao acessar Skyscanner")
-            enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro HTTP {r.status_code} ao acessar Skyscanner")
+            print(f"Erro HTTP {r.status_code} ao acessar Kayak")
+            enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro HTTP {r.status_code} ao acessar Kayak")
             return None
 
         html = r.text
 
-        # Salva e envia o HTML bruto para debug
-        with open("ultimo_html.html", "w", encoding="utf-8") as f:
+        # Salvar HTML para debug
+        with open("ultimo_html_kayak.html", "w", encoding="utf-8") as f:
             f.write(html)
 
-        files = {'document': open("ultimo_html.html", 'rb')}
-        data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': '📄 HTML capturado do Skyscanner'}
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument", data=data, files=files)
-
         soup = BeautifulSoup(html, "html.parser")
-        preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
+
+        # Busca o primeiro preço exibido (classe pode mudar, ajuste se necessário)
+        preco_span = soup.find("span", class_="price option-text")
 
         if not preco_span:
-            enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou o preço no HTML. Talvez a página mudou ou o seletor está incorreto.")
+            enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou o preço no HTML do Kayak. Talvez o seletor precise ser ajustado.")
             return None
 
         texto_preco = preco_span.get_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
@@ -92,7 +94,6 @@ def buscar_voo():
         print(f"Erro ao buscar preço: {e}")
         enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro ao buscar preço: {e}")
         return None
-
 
 def processar_comandos():
     global ESTADO_ATUALIZACAO
@@ -196,13 +197,11 @@ def processar_comandos():
             print(f"Erro no loop de comandos: {e}")
         time.sleep(2)
 
-
 def loop_busca_voos():
     while True:
         if CONFIG.get("busca_pausada"):
             print("🔴 Busca pausada.")
         else:
-            print("🔍 Iniciando busca de voo...")
             preco = buscar_voo()
             CONFIG["estatisticas"]["buscas_feitas"] += 1
             if preco is None:
@@ -218,7 +217,12 @@ def loop_busca_voos():
                         f"🗓️ {CONFIG['data_ida']} até {CONFIG['data_volta']}\n"
                         f"💰 <b>R$ {preco:.2f}</b>"
                     )
-                    link = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/"
+                    link = (
+                        f"https://www.kayak.com.br/flights/"
+                        f"{CONFIG['origem']}-{CONFIG['destino']}/"
+                        f"{CONFIG['data_ida']}/"
+                        f"{CONFIG['data_volta']}"
+                    )
                     botoes = [[{"text": "🔗 Comprar agora", "url": link}]]
                     enviar_mensagem(TELEGRAM_CHAT_ID, mensagem, botoes)
                 else:
@@ -227,11 +231,9 @@ def loop_busca_voos():
         print("⏳ Esperando 60s...\n")
         time.sleep(60)
 
-
 def main():
     Thread(target=processar_comandos, daemon=True).start()
     loop_busca_voos()
-
 
 if __name__ == "__main__":
     main()
