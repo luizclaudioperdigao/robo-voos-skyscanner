@@ -6,6 +6,7 @@ import json
 import os
 
 CONFIG_PATH = "config.json"
+HTML_DEBUG_PATH = "ultimo_html.html"
 
 def carregar_config():
     if os.path.exists(CONFIG_PATH):
@@ -31,10 +32,12 @@ def salvar_config():
 
 CONFIG = carregar_config()
 ESTADO_ATUALIZACAO = None
-
 TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
 TELEGRAM_CHAT_ID = "603459673"
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+
+# Para evitar spam da mensagem de erro repetida:
+ja_alertou_seletor = False
 
 def enviar_mensagem(chat_id, texto, botoes=None):
     url = f"{TELEGRAM_API_URL}/sendMessage"
@@ -53,42 +56,61 @@ def enviar_mensagem(chat_id, texto, botoes=None):
         print(f"Erro ao enviar mensagem: {e}")
 
 def buscar_voo():
-    # Monta a URL Kayak para busca de voos
-    url = (
-        f"https://www.kayak.com.br/flights/"
-        f"{CONFIG['origem']}-{CONFIG['destino']}/"
-        f"{CONFIG['data_ida']}/"
-        f"{CONFIG['data_volta']}"
-        f"?sort=bestflight_a"
-    )
+    global ja_alertou_seletor
+    url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8"
     }
     try:
         r = requests.get(url, headers=headers, timeout=30)
         if r.status_code != 200:
-            print(f"Erro HTTP {r.status_code} ao acessar Kayak")
-            enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro HTTP {r.status_code} ao acessar Kayak")
+            print(f"Erro HTTP {r.status_code} ao acessar Skyscanner")
+            enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro HTTP {r.status_code} ao acessar Skyscanner")
             return None
 
         html = r.text
 
-        # Salvar HTML para debug
-        with open("ultimo_html_kayak.html", "w", encoding="utf-8") as f:
+        # Salva HTML para análise
+        with open(HTML_DEBUG_PATH, "w", encoding="utf-8") as f:
             f.write(html)
 
         soup = BeautifulSoup(html, "html.parser")
 
-        # Busca o primeiro preço exibido (classe pode mudar, ajuste se necessário)
-        preco_span = soup.find("span", class_="price option-text")
+        # Tentativas de encontrar preço em múltiplos locais comuns do site:
+        candidatos = []
 
-        if not preco_span:
-            enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou o preço no HTML do Kayak. Talvez o seletor precise ser ajustado.")
+        # Exemplo de seletor antigo (pode estar desatualizado)
+        candidatos += soup.select("span.BpkText_bpk-text__NT07H")
+        candidatos += soup.select("div.price")  # tentativa genérica
+        candidatos += soup.select("span.price-text")  # tentativa genérica
+        candidatos += soup.find_all("span", string=lambda s: s and "R$" in s)
+
+        preco_valor = None
+
+        for tag in candidatos:
+            texto = tag.get_text()
+            if not texto:
+                continue
+            texto = texto.strip().replace("R$", "").replace(".", "").replace(",", ".")
+            try:
+                valor = float(texto)
+                # filtro para descartar valores absurdos
+                if 50 <= valor <= 50000:
+                    preco_valor = valor
+                    break
+            except:
+                continue
+
+        if preco_valor is None:
+            if not ja_alertou_seletor:
+                enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou o preço no HTML. Talvez o seletor precise ser ajustado.\nHTML salvo em ultimo_html.html para análise.")
+                ja_alertou_seletor = True
             return None
 
-        texto_preco = preco_span.get_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
-        preco = float(texto_preco)
-        return preco
+        # Sucesso na captura do preço
+        ja_alertou_seletor = False
+        return preco_valor
 
     except Exception as e:
         print(f"Erro ao buscar preço: {e}")
@@ -202,8 +224,10 @@ def loop_busca_voos():
         if CONFIG.get("busca_pausada"):
             print("🔴 Busca pausada.")
         else:
+            print("🔍 Iniciando busca de voo...")
             preco = buscar_voo()
             CONFIG["estatisticas"]["buscas_feitas"] += 1
+
             if preco is None:
                 print("❌ Preço não encontrado.")
             else:
@@ -217,18 +241,14 @@ def loop_busca_voos():
                         f"🗓️ {CONFIG['data_ida']} até {CONFIG['data_volta']}\n"
                         f"💰 <b>R$ {preco:.2f}</b>"
                     )
-                    link = (
-                        f"https://www.kayak.com.br/flights/"
-                        f"{CONFIG['origem']}-{CONFIG['destino']}/"
-                        f"{CONFIG['data_ida']}/"
-                        f"{CONFIG['data_volta']}"
-                    )
+                    link = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/"
                     botoes = [[{"text": "🔗 Comprar agora", "url": link}]]
                     enviar_mensagem(TELEGRAM_CHAT_ID, mensagem, botoes)
                 else:
                     print("🔎 Acima do limite.")
+
         salvar_config()
-        print("⏳ Esperando 60s...\n")
+        print("⏳ Esperando 60 segundos...\n")
         time.sleep(60)
 
 def main():
