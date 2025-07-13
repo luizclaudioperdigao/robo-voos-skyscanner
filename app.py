@@ -4,13 +4,13 @@ from bs4 import BeautifulSoup
 from threading import Thread
 import json
 import os
+import re
 
 CONFIG_PATH = "config.json"
-HTML_DEBUG_PATH = "ultimo_html.html"
 
 def carregar_config():
     if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r") as f:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
     else:
         return {
@@ -23,21 +23,20 @@ def carregar_config():
             "estatisticas": {
                 "buscas_feitas": 0,
                 "ult_voo_baixo_preco": None
-            }
+            },
+            "erro_preco_enviado": False
         }
 
 def salvar_config():
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(CONFIG, f, indent=2)
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(CONFIG, f, indent=2, ensure_ascii=False)
 
 CONFIG = carregar_config()
 ESTADO_ATUALIZACAO = None
+
 TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
 TELEGRAM_CHAT_ID = "603459673"
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-
-# Para evitar spam da mensagem de erro repetida:
-ja_alertou_seletor = False
 
 def enviar_mensagem(chat_id, texto, botoes=None):
     url = f"{TELEGRAM_API_URL}/sendMessage"
@@ -56,11 +55,9 @@ def enviar_mensagem(chat_id, texto, botoes=None):
         print(f"Erro ao enviar mensagem: {e}")
 
 def buscar_voo():
-    global ja_alertou_seletor
     url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
     }
     try:
         r = requests.get(url, headers=headers, timeout=30)
@@ -71,46 +68,41 @@ def buscar_voo():
 
         html = r.text
 
-        # Salva HTML para análise
-        with open(HTML_DEBUG_PATH, "w", encoding="utf-8") as f:
-            f.write(html)
+        # Salva o HTML para análise
+        try:
+            with open("ultimo_html.html", "w", encoding="utf-8") as f:
+                f.write(html)
+            print("[INFO] HTML salvo em 'ultimo_html.html'")
+        except Exception as e:
+            print(f"[ERRO] Falha ao salvar arquivo HTML: {e}")
 
         soup = BeautifulSoup(html, "html.parser")
 
-        # Tentativas de encontrar preço em múltiplos locais comuns do site:
-        candidatos = []
+        # Procura textos com padrão de preço (ex: R$ 1.234)
+        preco_textos = []
+        for tag in soup.find_all(text=re.compile(r"R\$\s*\d+")):
+            preco_textos.append(tag.strip())
 
-        # Exemplo de seletor antigo (pode estar desatualizado)
-        candidatos += soup.select("span.BpkText_bpk-text__NT07H")
-        candidatos += soup.select("div.price")  # tentativa genérica
-        candidatos += soup.select("span.price-text")  # tentativa genérica
-        candidatos += soup.find_all("span", string=lambda s: s and "R$" in s)
+        precos_encontrados = []
+        for texto in preco_textos:
+            m = re.search(r"R\$\s*([\d\.,]+)", texto)
+            if m:
+                valor_str = m.group(1).replace(".", "").replace(",", ".")
+                try:
+                    preco_valor = float(valor_str)
+                    precos_encontrados.append(preco_valor)
+                except:
+                    pass
 
-        preco_valor = None
-
-        for tag in candidatos:
-            texto = tag.get_text()
-            if not texto:
-                continue
-            texto = texto.strip().replace("R$", "").replace(".", "").replace(",", ".")
-            try:
-                valor = float(texto)
-                # filtro para descartar valores absurdos
-                if 50 <= valor <= 50000:
-                    preco_valor = valor
-                    break
-            except:
-                continue
-
-        if preco_valor is None:
-            if not ja_alertou_seletor:
-                enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou o preço no HTML. Talvez o seletor precise ser ajustado.\nHTML salvo em ultimo_html.html para análise.")
-                ja_alertou_seletor = True
+        if not precos_encontrados:
+            if not CONFIG.get("erro_preco_enviado", False):
+                enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou preço no HTML do Skyscanner. Verifique o arquivo ultimo_html.html para análise.")
+                CONFIG["erro_preco_enviado"] = True
+                salvar_config()
             return None
 
-        # Sucesso na captura do preço
-        ja_alertou_seletor = False
-        return preco_valor
+        preco_min = min(precos_encontrados)
+        return preco_min
 
     except Exception as e:
         print(f"Erro ao buscar preço: {e}")
@@ -224,10 +216,8 @@ def loop_busca_voos():
         if CONFIG.get("busca_pausada"):
             print("🔴 Busca pausada.")
         else:
-            print("🔍 Iniciando busca de voo...")
             preco = buscar_voo()
             CONFIG["estatisticas"]["buscas_feitas"] += 1
-
             if preco is None:
                 print("❌ Preço não encontrado.")
             else:
@@ -246,9 +236,8 @@ def loop_busca_voos():
                     enviar_mensagem(TELEGRAM_CHAT_ID, mensagem, botoes)
                 else:
                     print("🔎 Acima do limite.")
-
         salvar_config()
-        print("⏳ Esperando 60 segundos...\n")
+        print("⏳ Esperando 60s...\n")
         time.sleep(60)
 
 def main():
