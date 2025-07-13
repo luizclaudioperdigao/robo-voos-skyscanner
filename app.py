@@ -4,32 +4,30 @@ from bs4 import BeautifulSoup
 from threading import Thread
 import json
 import os
-import re
 
 CONFIG_PATH = "config.json"
+HTML_DEBUG_PATH = "ultimo_html.html"
 
 def carregar_config():
     if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        with open(CONFIG_PATH, "r") as f:
             return json.load(f)
-    else:
-        return {
-            "origem": "CNF",
-            "destino": "MCO",
-            "data_ida": "2025-09-15",
-            "data_volta": "2025-10-05",
-            "max_preco": 2000,
-            "busca_pausada": False,
-            "estatisticas": {
-                "buscas_feitas": 0,
-                "ult_voo_baixo_preco": None
-            },
-            "erro_preco_enviado": False
+    return {
+        "origem": "CNF",
+        "destino": "MIA",
+        "data_ida": "2025-08-18",
+        "data_volta": "2025-09-05",
+        "max_preco": 99999,
+        "busca_pausada": False,
+        "estatisticas": {
+            "buscas_feitas": 0,
+            "ult_voo_baixo_preco": None
         }
+    }
 
 def salvar_config():
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(CONFIG, f, indent=2, ensure_ascii=False)
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(CONFIG, f, indent=2)
 
 CONFIG = carregar_config()
 ESTADO_ATUALIZACAO = None
@@ -56,56 +54,28 @@ def enviar_mensagem(chat_id, texto, botoes=None):
 
 def buscar_voo():
     url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-    }
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
         r = requests.get(url, headers=headers, timeout=30)
         if r.status_code != 200:
-            print(f"Erro HTTP {r.status_code} ao acessar Skyscanner")
             enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro HTTP {r.status_code} ao acessar Skyscanner")
             return None
 
         html = r.text
-
-        # Salva o HTML para análise
-        try:
-            with open("ultimo_html.html", "w", encoding="utf-8") as f:
-                f.write(html)
-            print("[INFO] HTML salvo em 'ultimo_html.html'")
-        except Exception as e:
-            print(f"[ERRO] Falha ao salvar arquivo HTML: {e}")
+        with open(HTML_DEBUG_PATH, "w", encoding="utf-8") as f:
+            f.write(html)
 
         soup = BeautifulSoup(html, "html.parser")
+        span = soup.find("span", class_="BpkText_bpk-text__NT07H")
 
-        # Procura textos com padrão de preço (ex: R$ 1.234)
-        preco_textos = []
-        for tag in soup.find_all(text=re.compile(r"R\$\s*\d+")):
-            preco_textos.append(tag.strip())
-
-        precos_encontrados = []
-        for texto in preco_textos:
-            m = re.search(r"R\$\s*([\d\.,]+)", texto)
-            if m:
-                valor_str = m.group(1).replace(".", "").replace(",", ".")
-                try:
-                    preco_valor = float(valor_str)
-                    precos_encontrados.append(preco_valor)
-                except:
-                    pass
-
-        if not precos_encontrados:
-            if not CONFIG.get("erro_preco_enviado", False):
-                enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou preço no HTML do Skyscanner. Verifique o arquivo ultimo_html.html para análise.")
-                CONFIG["erro_preco_enviado"] = True
-                salvar_config()
+        if not span:
+            enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou o preço no HTML. Talvez a página mudou ou o seletor está incorreto.")
             return None
 
-        preco_min = min(precos_encontrados)
-        return preco_min
+        texto_preco = span.get_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
+        return float(texto_preco)
 
     except Exception as e:
-        print(f"Erro ao buscar preço: {e}")
         enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro ao buscar preço: {e}")
         return None
 
@@ -125,7 +95,6 @@ def processar_comandos():
 
             for update in updates:
                 offset = update["update_id"] + 1
-
                 if "callback_query" in update:
                     callback = update["callback_query"]
                     data = callback["data"]
@@ -216,6 +185,7 @@ def loop_busca_voos():
         if CONFIG.get("busca_pausada"):
             print("🔴 Busca pausada.")
         else:
+            print("🔍 Iniciando busca de voo...")
             preco = buscar_voo()
             CONFIG["estatisticas"]["buscas_feitas"] += 1
             if preco is None:
@@ -235,9 +205,8 @@ def loop_busca_voos():
                     botoes = [[{"text": "🔗 Comprar agora", "url": link}]]
                     enviar_mensagem(TELEGRAM_CHAT_ID, mensagem, botoes)
                 else:
-                    print("🔎 Acima do limite.")
+                    print("🔎 Preço acima do limite.")
         salvar_config()
-        print("⏳ Esperando 60s...\n")
         time.sleep(60)
 
 def main():
