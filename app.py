@@ -6,7 +6,7 @@ import json
 import os
 
 CONFIG_PATH = "config.json"
-HTML_DEBUG_FILE = "ultimo_html.html"
+
 
 def carregar_config():
     if os.path.exists(CONFIG_PATH):
@@ -26,9 +26,11 @@ def carregar_config():
             }
         }
 
+
 def salvar_config():
     with open(CONFIG_PATH, "w") as f:
         json.dump(CONFIG, f, indent=2)
+
 
 CONFIG = carregar_config()
 ESTADO_ATUALIZACAO = None
@@ -36,6 +38,7 @@ ESTADO_ATUALIZACAO = None
 TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
 TELEGRAM_CHAT_ID = "603459673"
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+
 
 def enviar_mensagem(chat_id, texto, botoes=None):
     url = f"{TELEGRAM_API_URL}/sendMessage"
@@ -53,6 +56,7 @@ def enviar_mensagem(chat_id, texto, botoes=None):
     except Exception as e:
         print(f"Erro ao enviar mensagem: {e}")
 
+
 def buscar_voo():
     url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -65,9 +69,13 @@ def buscar_voo():
 
         html = r.text
 
-        # Salva o HTML no arquivo para debug local
-        with open(HTML_DEBUG_FILE, "w", encoding="utf-8") as f:
+        # Salva e envia o HTML bruto para debug
+        with open("ultimo_html.html", "w", encoding="utf-8") as f:
             f.write(html)
+
+        files = {'document': open("ultimo_html.html", 'rb')}
+        data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': '📄 HTML capturado do Skyscanner'}
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument", data=data, files=files)
 
         soup = BeautifulSoup(html, "html.parser")
         preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
@@ -84,6 +92,7 @@ def buscar_voo():
         print(f"Erro ao buscar preço: {e}")
         enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro ao buscar preço: {e}")
         return None
+
 
 def processar_comandos():
     global ESTADO_ATUALIZACAO
@@ -187,11 +196,13 @@ def processar_comandos():
             print(f"Erro no loop de comandos: {e}")
         time.sleep(2)
 
+
 def loop_busca_voos():
     while True:
         if CONFIG.get("busca_pausada"):
             print("🔴 Busca pausada.")
         else:
+            print("🔍 Iniciando busca de voo...")
             preco = buscar_voo()
             CONFIG["estatisticas"]["buscas_feitas"] += 1
             if preco is None:
@@ -216,9 +227,11 @@ def loop_busca_voos():
         print("⏳ Esperando 60s...\n")
         time.sleep(60)
 
+
 def main():
     Thread(target=processar_comandos, daemon=True).start()
     loop_busca_voos()
+
 
 if __name__ == "__main__":
     main()
