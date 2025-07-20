@@ -12,18 +12,19 @@ def carregar_config():
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r") as f:
             return json.load(f)
-    return {
-        "origem": "CNF",
-        "destino": "MIA",
-        "data_ida": "2025-08-18",
-        "data_volta": "2025-09-05",
-        "max_preco": 99999,
-        "busca_pausada": False,
-        "estatisticas": {
-            "buscas_feitas": 0,
-            "ult_voo_baixo_preco": None
+    else:
+        return {
+            "origem": "CNF",
+            "destino": "MIA",
+            "data_ida": "2025-08-18",
+            "data_volta": "2025-09-05",
+            "max_preco": 99999,
+            "busca_pausada": False,
+            "estatisticas": {
+                "buscas_feitas": 0,
+                "ult_voo_baixo_preco": None
+            }
         }
-    }
 
 def salvar_config():
     with open(CONFIG_PATH, "w") as f:
@@ -54,10 +55,11 @@ def enviar_mensagem(chat_id, texto, botoes=None):
 
 def buscar_voo():
     url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
         r = requests.get(url, headers=headers, timeout=30)
         if r.status_code != 200:
+            print(f"Erro HTTP {r.status_code} ao acessar Skyscanner")
             enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro HTTP {r.status_code} ao acessar Skyscanner")
             return None
 
@@ -66,16 +68,29 @@ def buscar_voo():
             f.write(html)
 
         soup = BeautifulSoup(html, "html.parser")
-        span = soup.find("span", class_="BpkText_bpk-text__NT07H")
 
-        if not span:
-            enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou o preço no HTML. Talvez a página mudou ou o seletor está incorreto.")
-            return None
+        # Tenta diferentes seletores
+        seletores = [
+            ("span", "BpkText_bpk-text__NT07H"),
+            ("span", "Price_mainPriceContainer__1dqsw"),
+            ("div", "price option-text")
+        ]
 
-        texto_preco = span.get_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
-        return float(texto_preco)
+        for tag, classe in seletores:
+            elemento = soup.find(tag, class_=classe)
+            if elemento:
+                texto_preco = elemento.get_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
+                try:
+                    return float(texto_preco)
+                except:
+                    continue
+
+        print("⚠️ Não encontrou o preço no HTML do Skyscanner.")
+        enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou o preço no HTML do Skyscanner. Verifique o arquivo ultimo_html.html.")
+        return None
 
     except Exception as e:
+        print(f"Erro ao buscar preço: {e}")
         enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro ao buscar preço: {e}")
         return None
 
@@ -95,6 +110,7 @@ def processar_comandos():
 
             for update in updates:
                 offset = update["update_id"] + 1
+
                 if "callback_query" in update:
                     callback = update["callback_query"]
                     data = callback["data"]
@@ -157,13 +173,10 @@ def processar_comandos():
                         f"• Busca pausada: {'Sim' if CONFIG['busca_pausada'] else 'Não'}"
                     )
                     botoes = [
-                        [{"text": "✏️ Origem", "callback_data": "ORIGEM"},
-                         {"text": "✏️ Destino", "callback_data": "DESTINO"}],
-                        [{"text": "📅 Ida", "callback_data": "IDA"},
-                         {"text": "📅 Volta", "callback_data": "VOLTA"}],
+                        [{"text": "✏️ Origem", "callback_data": "ORIGEM"}, {"text": "✏️ Destino", "callback_data": "DESTINO"}],
+                        [{"text": "📅 Ida", "callback_data": "IDA"}, {"text": "📅 Volta", "callback_data": "VOLTA"}],
                         [{"text": "💸 Preço", "callback_data": "PRECO"}],
-                        [{"text": "⏸️ Pausar", "callback_data": "PAUSAR"},
-                         {"text": "▶️ Continuar", "callback_data": "CONTINUAR"}]
+                        [{"text": "⏸️ Pausar", "callback_data": "PAUSAR"}, {"text": "▶️ Continuar", "callback_data": "CONTINUAR"}]
                     ]
                     enviar_mensagem(chat_id, msg, botoes)
                 elif texto == "/status":
@@ -205,8 +218,9 @@ def loop_busca_voos():
                     botoes = [[{"text": "🔗 Comprar agora", "url": link}]]
                     enviar_mensagem(TELEGRAM_CHAT_ID, mensagem, botoes)
                 else:
-                    print("🔎 Preço acima do limite.")
+                    print("🔎 Acima do limite.")
         salvar_config()
+        print("⏳ Esperando 60s...\n")
         time.sleep(60)
 
 def main():
