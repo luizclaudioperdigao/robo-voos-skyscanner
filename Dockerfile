@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpangocairo-1.0-0 \
     libpango-1.0-0 \
     libxcb1 \
-    libxfixes0 \
+    libxfixes \
     libxshmfence1 \
     libglib2.0-0 \
     libfontconfig1 \
