@@ -4,6 +4,7 @@ import os
 from threading import Thread
 from playwright.sync_api import sync_playwright
 import requests
+from datetime import datetime
 
 CONFIG_PATH = "config.json"
 
@@ -72,33 +73,60 @@ def buscar_voo():
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
-            page.goto(url, timeout=60000)
-            
-            # Espera algum seletor de preço aparecer (ajuste conforme o seletor real)
-            page.wait_for_selector("span.BpkText_bpk-text__NT07H", timeout=15000)
+            try:
+                page.goto(url, timeout=60000)
+                
+                # Tenta vários seletores para pegar o preço, caso o primeiro não funcione
+                seletores = [
+                    "span.BpkText_bpk-text__NT07H",
+                    "span[data-test-id='price']",
+                    "span.price-text"
+                ]
+                preco_texto = None
+                for sel in seletores:
+                    try:
+                        page.wait_for_selector(sel, timeout=10000)
+                        preco_elem = page.query_selector(sel)
+                        if preco_elem:
+                            preco_texto = preco_elem.inner_text()
+                            if preco_texto:
+                                break
+                    except:
+                        continue
+                
+                if not preco_texto:
+                    enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou o preço no HTML do Skyscanner.")
+                    html = page.content()
+                    with open("ultimo_html.html", "w", encoding="utf-8") as f:
+                        f.write(html)
+                    enviar_arquivo(TELEGRAM_CHAT_ID, "ultimo_html.html")
+                    return None
+                
+                # Limpa o texto e converte preço
+                texto_preco = preco_texto.replace("R$", "").replace(".", "").replace(",", ".").strip()
+                preco = float(texto_preco)
+                return preco
 
-            html = page.content()
-            with open("ultimo_html.html", "w", encoding="utf-8") as f:
-                f.write(html)
-            enviar_arquivo(TELEGRAM_CHAT_ID, "ultimo_html.html")
-
-            # Pega o primeiro preço exibido na página
-            preco_texto = page.query_selector("span.BpkText_bpk-text__NT07H")
-            if not preco_texto:
-                enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou o preço no HTML do Skyscanner.")
+            finally:
                 browser.close()
-                return None
-
-            texto_preco = preco_texto.inner_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
-            preco = float(texto_preco)
-            browser.close()
-            return preco
 
     except Exception as e:
         enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro ao buscar preço com Playwright: {e}")
         return None
 
-# processar_comandos() e loop_busca_voos() permanecem iguais ao seu código original, só copiei abaixo para manter tudo junto
+def validar_data(data_texto):
+    try:
+        datetime.strptime(data_texto, "%Y-%m-%d")
+        return True
+    except:
+        return False
+
+def validar_preco(preco_texto):
+    try:
+        preco = float(preco_texto)
+        return preco >= 0
+    except:
+        return False
 
 def processar_comandos():
     global ESTADO_ATUALIZACAO
@@ -154,15 +182,24 @@ def processar_comandos():
                         elif ESTADO_ATUALIZACAO == "DESTINO":
                             CONFIG["destino"] = texto.upper()
                         elif ESTADO_ATUALIZACAO == "IDA":
+                            if not validar_data(texto):
+                                enviar_mensagem(chat_id, "❌ Data inválida! Use formato <b>AAAA-MM-DD</b>.")
+                                continue
                             CONFIG["data_ida"] = texto
                         elif ESTADO_ATUALIZACAO == "VOLTA":
+                            if not validar_data(texto):
+                                enviar_mensagem(chat_id, "❌ Data inválida! Use formato <b>AAAA-MM-DD</b>.")
+                                continue
                             CONFIG["data_volta"] = texto
                         elif ESTADO_ATUALIZACAO == "PRECO":
+                            if not validar_preco(texto):
+                                enviar_mensagem(chat_id, "❌ Preço inválido! Informe um número positivo.")
+                                continue
                             CONFIG["max_preco"] = float(texto)
                         salvar_config()
                         enviar_mensagem(chat_id, "✅ Configuração atualizada!")
-                    except:
-                        enviar_mensagem(chat_id, "❌ Erro. Verifique o valor.")
+                    except Exception as e:
+                        enviar_mensagem(chat_id, f"❌ Erro: {e}")
                     ESTADO_ATUALIZACAO = None
                     continue
 
