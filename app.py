@@ -1,12 +1,11 @@
 import time
-import requests
-from bs4 import BeautifulSoup
-from threading import Thread
 import json
 import os
+from threading import Thread
+from playwright.sync_api import sync_playwright
+import requests
 
 CONFIG_PATH = "config.json"
-
 
 def carregar_config():
     if os.path.exists(CONFIG_PATH):
@@ -26,11 +25,9 @@ def carregar_config():
             }
         }
 
-
 def salvar_config():
     with open(CONFIG_PATH, "w") as f:
         json.dump(CONFIG, f, indent=2)
-
 
 CONFIG = carregar_config()
 ESTADO_ATUALIZACAO = None
@@ -38,7 +35,6 @@ ESTADO_ATUALIZACAO = None
 TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
 TELEGRAM_CHAT_ID = "603459673"
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-
 
 def enviar_mensagem(chat_id, texto, botoes=None):
     url = f"{TELEGRAM_API_URL}/sendMessage"
@@ -56,7 +52,6 @@ def enviar_mensagem(chat_id, texto, botoes=None):
     except Exception as e:
         print(f"Erro ao enviar mensagem: {e}")
 
-
 def enviar_arquivo(chat_id, nome_arquivo):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
     try:
@@ -69,36 +64,41 @@ def enviar_arquivo(chat_id, nome_arquivo):
     except Exception as e:
         print(f"Erro ao enviar arquivo: {e}")
 
-
 def buscar_voo():
     url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    print(f"🔎 Buscando voo em: {url}")
+
     try:
-        r = requests.get(url, headers=headers, timeout=30)
-        if r.status_code != 200:
-            enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro HTTP {r.status_code} ao acessar Skyscanner")
-            return None
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(url, timeout=60000)
+            
+            # Espera algum seletor de preço aparecer (ajuste conforme o seletor real)
+            page.wait_for_selector("span.BpkText_bpk-text__NT07H", timeout=15000)
 
-        html = r.text
-        with open("ultimo_html.html", "w", encoding="utf-8") as f:
-            f.write(html)
+            html = page.content()
+            with open("ultimo_html.html", "w", encoding="utf-8") as f:
+                f.write(html)
+            enviar_arquivo(TELEGRAM_CHAT_ID, "ultimo_html.html")
 
-        enviar_arquivo(TELEGRAM_CHAT_ID, "ultimo_html.html")
+            # Pega o primeiro preço exibido na página
+            preco_texto = page.query_selector("span.BpkText_bpk-text__NT07H")
+            if not preco_texto:
+                enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou o preço no HTML do Skyscanner.")
+                browser.close()
+                return None
 
-        soup = BeautifulSoup(html, "html.parser")
-        preco_span = soup.find("span", class_="BpkText_bpk-text__NT07H")
-
-        if not preco_span:
-            enviar_mensagem(TELEGRAM_CHAT_ID, "⚠️ Não encontrou o preço no HTML do Skyscanner. Verifique o arquivo ultimo_html.html.")
-            return None
-
-        texto_preco = preco_span.get_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
-        return float(texto_preco)
+            texto_preco = preco_texto.inner_text().replace("R$", "").replace(".", "").replace(",", ".").strip()
+            preco = float(texto_preco)
+            browser.close()
+            return preco
 
     except Exception as e:
-        enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro ao buscar preço: {e}")
+        enviar_mensagem(TELEGRAM_CHAT_ID, f"❌ Erro ao buscar preço com Playwright: {e}")
         return None
 
+# processar_comandos() e loop_busca_voos() permanecem iguais ao seu código original, só copiei abaixo para manter tudo junto
 
 def processar_comandos():
     global ESTADO_ATUALIZACAO
@@ -202,7 +202,6 @@ def processar_comandos():
             print(f"Erro no loop de comandos: {e}")
         time.sleep(2)
 
-
 def loop_busca_voos():
     while True:
         if CONFIG.get("busca_pausada"):
@@ -231,11 +230,9 @@ def loop_busca_voos():
         salvar_config()
         time.sleep(60)
 
-
 def main():
     Thread(target=processar_comandos, daemon=True).start()
     loop_busca_voos()
-
 
 if __name__ == "__main__":
     main()
