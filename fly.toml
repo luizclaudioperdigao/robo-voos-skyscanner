@@ -3,6 +3,6 @@ app = "robo-voos-skyscanner-q2anvq"
 [build]
 
 [env]
-TELEGRAM_TOKEN = "7478647827:AAGzL65chbpIeTut9z8PGJcSnjlJdC-aN3w"
+TELEGRAM_TOKEN = "7478647827:AAG8FozuUUwvuznBHV7oBOGm9hd8XkSEQvc"
 TELEGRAM_CHAT_ID = "603459673"
 
