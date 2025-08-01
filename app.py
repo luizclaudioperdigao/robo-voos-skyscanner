@@ -9,9 +9,10 @@ CONFIG_PATH = "config.json"
 
 def carregar_config():
     if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r") as f:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
     else:
+        # Configuração padrão (edite conforme desejar)
         return {
             "origem": "CNF",
             "destino": "MIA",
@@ -25,20 +26,22 @@ def carregar_config():
             }
         }
 
-def salvar_config():
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(CONFIG, f, indent=2)
+def salvar_config(config):
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
 
 CONFIG = carregar_config()
-ESTADO_ATUALIZACAO = None
 
-# Usa variáveis de ambiente seguras
+# Carregar variáveis de ambiente com validação
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
 if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-    raise RuntimeError("❌ As variáveis de ambiente TELEGRAM_TOKEN e TELEGRAM_CHAT_ID não estão definidas.")
+    raise RuntimeError(
+        "❌ Variáveis de ambiente TELEGRAM_TOKEN e TELEGRAM_CHAT_ID precisam estar definidas."
+    )
+
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
 def enviar_mensagem(chat_id, texto, botoes=None):
     url = f"{TELEGRAM_API_URL}/sendMessage"
@@ -50,14 +53,17 @@ def enviar_mensagem(chat_id, texto, botoes=None):
     if botoes:
         payload["reply_markup"] = {"inline_keyboard": botoes}
     try:
+        print(f"[LOG] Enviando mensagem para chat_id={chat_id} com token início={TELEGRAM_TOKEN[:10]}...")
         r = requests.post(url, json=payload, timeout=10)
         if not r.ok:
-            print(f"⚠️ Erro ao enviar mensagem: {r.text}")
+            print(f"⚠️ Erro ao enviar mensagem: {r.status_code} - {r.text}")
+        else:
+            print(f"[LOG] Mensagem enviada com sucesso.")
     except Exception as e:
-        print(f"Erro ao enviar mensagem: {e}")
+        print(f"❌ Exceção ao enviar mensagem: {e}")
 
 def enviar_arquivo(chat_id, nome_arquivo):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
+    url = f"{TELEGRAM_API_URL}/sendDocument"
     try:
         with open(nome_arquivo, "rb") as file:
             files = {"document": file}
@@ -65,12 +71,14 @@ def enviar_arquivo(chat_id, nome_arquivo):
             r = requests.post(url, files=files, data=data)
             if not r.ok:
                 print(f"Erro ao enviar arquivo: {r.text}")
+            else:
+                print("[LOG] Arquivo enviado com sucesso.")
     except Exception as e:
         print(f"Erro ao enviar arquivo: {e}")
 
 def buscar_voo():
     url = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/?adults=1&children=0&adultsv2=1&cabinclass=economy"
-    print(f"🔎 Buscando voo em: {url}")
+    print(f"[LOG] Buscando voo em: {url}")
 
     try:
         with sync_playwright() as p:
@@ -100,12 +108,16 @@ def buscar_voo():
         return None
 
 def processar_comandos():
-    global ESTADO_ATUALIZACAO
+    ESTADO_ATUALIZACAO = None
     offset = None
+
     while True:
         try:
             url = f"{TELEGRAM_API_URL}/getUpdates"
-            url += f"?offset={offset}&timeout=30" if offset else "?timeout=30"
+            if offset:
+                url += f"?offset={offset}&timeout=30"
+            else:
+                url += "?timeout=30"
 
             r = requests.get(url, timeout=40)
             updates = r.json().get("result", [])
@@ -120,7 +132,7 @@ def processar_comandos():
 
                     if data in ["PAUSAR", "CONTINUAR"]:
                         CONFIG["busca_pausada"] = (data == "PAUSAR")
-                        salvar_config()
+                        salvar_config(CONFIG)
                         status = "⏸️ Busca pausada." if data == "PAUSAR" else "▶️ Busca retomada."
                         enviar_mensagem(chat_id, status)
                         continue
@@ -155,9 +167,9 @@ def processar_comandos():
                             CONFIG["data_volta"] = texto
                         elif ESTADO_ATUALIZACAO == "PRECO":
                             CONFIG["max_preco"] = float(texto)
-                        salvar_config()
+                        salvar_config(CONFIG)
                         enviar_mensagem(chat_id, "✅ Configuração atualizada!")
-                    except:
+                    except Exception:
                         enviar_mensagem(chat_id, "❌ Erro. Verifique o valor.")
                     ESTADO_ATUALIZACAO = None
                     continue
@@ -194,24 +206,25 @@ def processar_comandos():
                         f"• Último voo barato: {f'R$ {ult:.2f}' if ult else 'Nenhum ainda'}"
                     )
                     enviar_mensagem(chat_id, msg)
+
         except Exception as e:
-            print(f"Erro no loop de comandos: {e}")
+            print(f"❌ Erro no loop de comandos: {e}")
         time.sleep(2)
 
 def loop_busca_voos():
     while True:
         if CONFIG.get("busca_pausada"):
-            print("🔴 Busca pausada.")
+            print("[LOG] 🔴 Busca pausada.")
         else:
             preco = buscar_voo()
-            CONFIG["estatisticas"]["buscas_feitas"] += 1
+            CONFIG["estatisticas"]["buscas_feitas"] = CONFIG["estatisticas"].get("buscas_feitas", 0) + 1
             if preco is None:
-                print("❌ Preço não encontrado.")
+                print("[LOG] ❌ Preço não encontrado.")
             else:
-                print(f"💰 Preço atual: R$ {preco:.2f}")
+                print(f"[LOG] 💰 Preço atual: R$ {preco:.2f}")
                 if preco <= CONFIG["max_preco"]:
                     CONFIG["estatisticas"]["ult_voo_baixo_preco"] = preco
-                    salvar_config()
+                    salvar_config(CONFIG)
                     mensagem = (
                         f"✈️ <b>Voo barato!</b>\n"
                         f"📍 {CONFIG['origem']} → {CONFIG['destino']}\n"
@@ -220,13 +233,15 @@ def loop_busca_voos():
                     )
                     link = f"https://www.skyscanner.com.br/transport/flights/{CONFIG['origem']}/{CONFIG['destino']}/{CONFIG['data_ida']}/{CONFIG['data_volta']}/"
                     botoes = [[{"text": "🔗 Comprar agora", "url": link}]]
+                    print(f"[LOG] Enviando mensagem para chat_id={TELEGRAM_CHAT_ID}")
                     enviar_mensagem(TELEGRAM_CHAT_ID, mensagem, botoes)
                 else:
-                    print("🔎 Acima do limite.")
-        salvar_config()
+                    print("[LOG] 🔎 Preço acima do limite.")
+        salvar_config(CONFIG)
         time.sleep(60)
 
 def main():
+    print("[LOG] Iniciando bot de voos baratos.")
     Thread(target=processar_comandos, daemon=True).start()
     loop_busca_voos()
 
